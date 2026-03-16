@@ -1,13 +1,14 @@
 {
   "name": "piramyd",
-  "version": "0.1.0",
-  "description": "Interactive Piramyd onboarding for Codex CLI, Claude Code, Kimi Code, and OpenClaw.",
+  "version": "0.1.6",
+  "description": "Interactive Piramyd onboarding for Codex, Claude Code, Kimi, OpenClaw, Gemini, Qwen, and OpenCode.",
   "bin": {
     "piramyd": "bin/piramyd.js"
   },
   "type": "commonjs",
   "files": [
-    "bin"
+    "bin",
+    "src"
   ],
   "keywords": [
     "piramyd",
@@ -15,6 +16,9 @@
     "claude-code",
     "kimi",
     "openclaw",
+    "gemini",
+    "qwen",
+    "opencode",
     "onboarding",
     "ai"
   ],
@@ -25,5 +29,9 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.1.0",
+    "picocolors": "^1.1.1"
   }
 }
