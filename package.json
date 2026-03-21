@@ -1,6 +1,6 @@
 {
   "name": "piramyd",
-  "version": "0.1.6",
+  "version": "0.1.9",
   "description": "Interactive Piramyd onboarding for Codex, Claude Code, Kimi, OpenClaw, Gemini, Qwen, and OpenCode.",
   "bin": {
     "piramyd": "bin/piramyd.js"
@@ -30,8 +30,19 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "lint": "eslint .",
+    "test:smoke": "node tests/smoke-write-config.js",
+    "test": "jest --runInBand",
+    "pretest": "npm run lint",
+    "prepublishOnly": "npm run lint && npm test && npm run test:smoke"
+  },
   "dependencies": {
     "@clack/prompts": "^1.1.0",
     "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "jest": "^29.7.0"
   }
 }

@@ -1,3 +1,22 @@
 node_modules
 *.tgz
 npm-debug.log*
+
+# Environment / secrets
+.env
+*.env
+piramyd.env
+
+# Coverage
+coverage/
+.nyc_output/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

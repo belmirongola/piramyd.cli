@@ -1,7 +1,7 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { KNOWN_TARGETS } = require("./constants");
+const { KNOWN_TARGETS, IS_WINDOWS } = require("./constants");
 
 function exists(filePath) {
   try {
@@ -20,6 +20,13 @@ function existsPath(filePath) {
 }
 function isExecutable(filePath) {
   try {
+    if (IS_WINDOWS) {
+      // On Windows, X_OK is unreliable; check that the file exists and has a
+      // recognised executable extension.
+      fs.accessSync(filePath, fs.constants.F_OK);
+      const ext = path.extname(filePath).toLowerCase();
+      return [".exe", ".cmd", ".bat", ".com", ".ps1"].includes(ext) || ext === "";
+    }
     fs.accessSync(filePath, fs.constants.X_OK);
     return true;
   } catch {
@@ -28,13 +35,35 @@ function isExecutable(filePath) {
 }
 function resolveCommand(binaryName) {
   const pathEntries = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
-  const candidates = [
-    ...pathEntries.map((entry) => path.join(entry, binaryName)),
-    path.resolve(os.homedir(), ".npm-global/bin", binaryName),
-    path.resolve(os.homedir(), ".local/bin", binaryName),
-    path.resolve("/opt/homebrew/bin", binaryName),
-    path.resolve("/usr/local/bin", binaryName),
-  ];
+
+  // On Windows, when binaryName lacks an extension, also try PATHEXT variants
+  const extensions = IS_WINDOWS && !path.extname(binaryName)
+    ? (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+    : [""];
+
+  const candidates = [];
+  for (const dir of pathEntries) {
+    for (const ext of extensions) {
+      candidates.push(path.join(dir, binaryName + ext));
+    }
+  }
+
+  // Platform-specific fallback directories
+  if (IS_WINDOWS) {
+    const appData = process.env.LOCALAPPDATA || path.resolve(os.homedir(), "AppData/Local");
+    for (const ext of extensions) {
+      candidates.push(path.resolve(appData, "Microsoft/WindowsApps", binaryName + ext));
+      candidates.push(path.resolve(os.homedir(), "AppData/Roaming/npm", binaryName + ext));
+    }
+  } else {
+    candidates.push(
+      path.resolve(os.homedir(), ".npm-global/bin", binaryName),
+      path.resolve(os.homedir(), ".local/bin", binaryName),
+      path.resolve("/opt/homebrew/bin", binaryName),
+      path.resolve("/usr/local/bin", binaryName)
+    );
+  }
+
   for (const candidate of candidates) {
     if (isExecutable(candidate)) return candidate;
   }
@@ -152,6 +181,14 @@ function fallbackBackupPath(filePath) {
   const safeName = filePath.replace(/[\\/]/g, "_").replace(/^_+/, "");
   return path.resolve(os.tmpdir(), "piramyd-onboard-backups", `${safeName}.bak.${Date.now()}`);
 }
+function safeChmod(filePath, mode) {
+  if (IS_WINDOWS) return; // chmod is a no-op on Windows
+  try {
+    fs.chmodSync(filePath, mode);
+  } catch {
+    // Silently ignore on filesystems that don't support chmod
+  }
+}
 function backupIfPresent(filePath, backups) {
   if (!exists(filePath)) return null;
   const original = fs.readFileSync(filePath);
@@ -160,12 +197,12 @@ function backupIfPresent(filePath, backups) {
   try {
     ensureParentDir(backup);
     fs.writeFileSync(backup, original);
-    fs.chmodSync(backup, stats.mode);
+    safeChmod(backup, stats.mode);
   } catch {
     backup = fallbackBackupPath(filePath);
     ensureParentDir(backup);
     fs.writeFileSync(backup, original);
-    fs.chmodSync(backup, stats.mode);
+    safeChmod(backup, stats.mode);
   }
   backups.push(backup);
   return backup;
@@ -176,7 +213,7 @@ function ensureParentDir(filePath) {
 function writeFileWithMode(filePath, contents, mode) {
   ensureParentDir(filePath);
   fs.writeFileSync(filePath, contents, "utf8");
-  if (typeof mode === "number") fs.chmodSync(filePath, mode);
+  if (typeof mode === "number") safeChmod(filePath, mode);
 }
 
 module.exports = {
@@ -185,5 +222,5 @@ module.exports = {
   truncateMiddle, wrapPlainLine, padRight, renderTomlString, renderTomlKey,
   renderTomlArray, renderShellString, renderInlineTomlTable, normalizeConfigPath,
   detectConfigKind, listAvailableTargets, fallbackBackupPath, backupIfPresent,
-  ensureParentDir, writeFileWithMode
+  ensureParentDir, writeFileWithMode, safeChmod
 };

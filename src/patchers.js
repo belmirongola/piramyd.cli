@@ -2,13 +2,26 @@ const fs = require("fs");
 const os = require("os");
 const {
   CODEX_PROFILE, CODEX_MODEL_PROVIDER, GENERATED_START, GENERATED_END,
-  PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL, CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH
+  PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL, CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH, IS_WINDOWS
 } = require("./constants");
 const {
   exists, escapeRegex, renderTomlString, renderTomlArray, renderShellString,
   aliasFromId, backupIfPresent, writeFileWithMode
 } = require("./utils");
 const { parseTomlSections, upsertTopLevelSetting, trimBoundaryBlankLines } = require("./toml");
+
+function loadJsonConfig(filePath, targetLabel) {
+  if (!exists(filePath)) return {};
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed ? parsed : {};
+  } catch (_err) {
+    throw new Error(
+      `Invalid JSON in ${targetLabel} config at ${filePath}. Fix the file or restore a backup, then re-run piramyd.`
+    );
+  }
+}
 
 function toOpenClawModelEntry(model) {
   return {
@@ -61,7 +74,7 @@ function firstModelId(models) {
   return (models || []).find((model) => model && typeof model.id === "string" && model.id.trim())?.id || "";
 }
 
-function targetDefaultModel(target, models, userTier = "free", selectedDefaultModelId = "") {
+function targetDefaultModel(target, models, _userTier = "free", selectedDefaultModelId = "") {
   if (target.kind === "claude") {
     const preferredModelId = String(selectedDefaultModelId || "").trim();
     const hasPreferredModel = preferredModelId
@@ -81,7 +94,7 @@ function targetDefaultModel(target, models, userTier = "free", selectedDefaultMo
   return `piramyd/${defaultModelId}`;
 }
 function updateOpenClawConfig(filePath, apiKey, models, userTier = "free", selectedDefaultModelId = "") {
-  const config = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const config = loadJsonConfig(filePath, "OpenClaw");
   config.meta = config.meta || {};
   config.meta.lastTouchedAt = new Date().toISOString();
   config.models = config.models || {};
@@ -228,13 +241,21 @@ function updateCodexConfig(filePath, models, selectedDefaultModelId = "") {
   return chunks.filter(Boolean).join("\n\n") + "\n";
 }
 function renderCodexSecretFile(apiKey) {
+  if (IS_WINDOWS) {
+    // Windows .env file — no shell quoting, just KEY=VALUE
+    return [
+      `OPENAI_API_KEY=${apiKey.trim()}`,
+      `OPENAI_BASE_URL=${PIRAMYD_OPENAI_BASE_URL}`,
+      "",
+    ].join("\r\n");
+  }
   return [
     `OPENAI_API_KEY=${renderShellString(apiKey.trim())}`,
     `OPENAI_BASE_URL=${renderShellString(PIRAMYD_OPENAI_BASE_URL)}`,
     "",
   ].join("\n");
 }
-function renderCodexLauncher(binaryPath) {
+function renderCodexLauncherUnix(binaryPath) {
   return [
     "#!/bin/sh",
     "set -eu",
@@ -254,29 +275,74 @@ function renderCodexLauncher(binaryPath) {
     '  key_tail=$(printf "%s" "$OPENAI_API_KEY" | tail -c 7)',
     `  echo "codex-piramyd(debug): env=$PIRAMYD_ENV base_url=${PIRAMYD_OPENAI_BASE_URL} key=***${'$'}{key_tail}" >&2`,
     'fi',
-    'use_profile=1',
+    'explicit_profile=0',
     'prev=""',
     'for arg in "$@"; do',
     '  if [ "$prev" = "model" ] || [ "$prev" = "profile" ]; then',
-    '    use_profile=0',
+    '    if [ "$prev" = "profile" ]; then explicit_profile=1; fi',
     '    prev=""',
     "    continue",
     "  fi",
     '  case "$arg" in',
-    '    -m|--model) use_profile=0; prev="model" ;;',
-    '    -p|--profile) use_profile=0; prev="profile" ;;',
+    '    -m|--model) prev="model" ;;',
+    '    -p|--profile) explicit_profile=1; prev="profile" ;;',
     "  esac",
     "done",
-    'if [ "$use_profile" -eq 1 ]; then',
+    'if [ "$explicit_profile" -eq 0 ]; then',
     `  exec "$CODEX_BIN" -p ${CODEX_PROFILE} "$@"`,
     "fi",
     'exec "$CODEX_BIN" "$@"',
     "",
   ].join("\n");
 }
+function renderCodexLauncherWindows(binaryPath) {
+  const codexBin = binaryPath || "codex";
+  // Escape CODEX_SECRET_PATH for batch: backslashes are native
+  return [
+    "@echo off",
+    "setlocal enabledelayedexpansion",
+    "",
+    `set "PIRAMYD_ENV=${CODEX_SECRET_PATH}"`,
+    `set "CODEX_BIN=${codexBin}"`,
+    `set "OPENAI_BASE_URL=${PIRAMYD_OPENAI_BASE_URL}"`,
+    "",
+    "rem Load secrets from env file",
+    'if exist "%PIRAMYD_ENV%" (',
+    '  for /f "usebackq tokens=1,* delims==" %%A in ("%PIRAMYD_ENV%") do (',
+    '    set "%%A=%%B"',
+    "  )",
+    ")",
+    "",
+    'if "%OPENAI_API_KEY%"=="" (',
+    "  echo Piramyd API key not configured for Codex. Re-run the wizard. >&2",
+    "  exit /b 1",
+    ")",
+    "",
+    "rem Check if user passed an explicit -p / --profile flag",
+    "set EXPLICIT_PROFILE=0",
+    'set "PREV="',
+    'for %%A in (%*) do (',
+    '  if "!PREV!"=="profile" set EXPLICIT_PROFILE=1',
+    '  set "PREV="',
+    '  if "%%~A"=="-p" set "PREV=profile"',
+    '  if "%%~A"=="--profile" set "PREV=profile"',
+    ")",
+    "",
+    'if "%EXPLICIT_PROFILE%"=="0" (',
+    `  "%CODEX_BIN%" -p ${CODEX_PROFILE} %*`,
+    ") else (",
+    '  "%CODEX_BIN%" %*',
+    ")",
+    "",
+  ].join("\r\n");
+}
+function renderCodexLauncher(binaryPath) {
+  return IS_WINDOWS
+    ? renderCodexLauncherWindows(binaryPath)
+    : renderCodexLauncherUnix(binaryPath);
+}
 function updateClaudeConfig(filePath, apiKey, models, userTier = "free", selectedDefaultModelId = "") {
-  const existing = exists(filePath) ? JSON.parse(fs.readFileSync(filePath, "utf8")) : {};
-  const config = typeof existing === "object" && existing ? existing : {};
+  const config = loadJsonConfig(filePath, "Claude Code");
   const env = typeof config.env === "object" && config.env ? config.env : {};
   const selected = pickClaudeModelSet(models);
 
@@ -294,8 +360,7 @@ function updateClaudeConfig(filePath, apiKey, models, userTier = "free", selecte
 }
 
 function updateGeminiConfig(filePath, apiKey) {
-  const existing = exists(filePath) ? JSON.parse(fs.readFileSync(filePath, "utf8")) : {};
-  const config = typeof existing === "object" && existing ? existing : {};
+  const config = loadJsonConfig(filePath, "Gemini CLI");
   config.security = config.security || {};
   config.security.auth = config.security.auth || {};
   config.security.auth.selectedType = "gemini-api-key";
@@ -306,8 +371,7 @@ function updateGeminiConfig(filePath, apiKey) {
 }
 
 function updateQwenConfig(filePath, apiKey, models, userTier = "free", selectedDefaultModelId = "") {
-  const existing = exists(filePath) ? JSON.parse(fs.readFileSync(filePath, "utf8")) : {};
-  const config = typeof existing === "object" && existing ? existing : {};
+  const config = loadJsonConfig(filePath, "Qwen CLI");
   config.security = config.security || {};
   config.security.auth = config.security.auth || {};
   config.security.auth.selectedType = "api-key";
@@ -320,8 +384,7 @@ function updateQwenConfig(filePath, apiKey, models, userTier = "free", selectedD
 }
 
 function updateOpenCodeConfig(filePath, apiKey, models, userTier = "free", selectedDefaultModelId = "") {
-  const existing = exists(filePath) ? JSON.parse(fs.readFileSync(filePath, "utf8")) : {};
-  const config = typeof existing === "object" && existing ? existing : {};
+  const config = loadJsonConfig(filePath, "OpenCode");
   config.providers = config.providers || {};
   config.providers.piramyd = {
     apiKey: apiKey.trim(),
@@ -333,10 +396,7 @@ function updateOpenCodeConfig(filePath, apiKey, models, userTier = "free", selec
   return JSON.stringify(config, null, 2) + os.EOL;
 }
 
-function writeConfig(target, apiKey, catalog) {
-  const backups = [];
-  backupIfPresent(target.path, backups);
-
+function generateConfig(target, apiKey, catalog) {
   const models = catalog.models || catalog;
   const tier = catalog.tier || "free";
   const selectedDefaultModelId = String(catalog.defaultModelId || "").trim();
@@ -351,20 +411,42 @@ function writeConfig(target, apiKey, catalog) {
   if (target.kind === "opencode") next = updateOpenCodeConfig(target.path, apiKey, models, tier, selectedDefaultModelId);
 
   if (typeof next !== "string") throw new Error(`Unsupported target kind: ${target.kind}`);
-  writeFileWithMode(target.path, next);
+
+  const result = { config: next, files: [{ path: target.path, content: next }] };
+  if (target.kind === "codex") {
+    const secretContent = renderCodexSecretFile(apiKey);
+    const launcherContent = renderCodexLauncher(target.binaryPath);
+    result.files.push({ path: CODEX_SECRET_PATH, content: secretContent, mode: 0o600 });
+    result.files.push({ path: CODEX_LAUNCHER_PATH, content: launcherContent, mode: 0o755 });
+  }
+  return result;
+}
+
+function writeConfig(target, apiKey, catalog, options = {}) {
+  const { dryRun = false } = options;
+  const generated = generateConfig(target, apiKey, catalog);
+
+  if (dryRun) {
+    return { backups: [], artifacts: [], preview: generated };
+  }
+
+  const backups = [];
+  backupIfPresent(target.path, backups);
+  writeFileWithMode(target.path, generated.config);
 
   const artifacts = [];
   if (target.kind === "codex") {
     backupIfPresent(CODEX_SECRET_PATH, backups);
     backupIfPresent(CODEX_LAUNCHER_PATH, backups);
-    writeFileWithMode(CODEX_SECRET_PATH, renderCodexSecretFile(apiKey), 0o600);
-    writeFileWithMode(CODEX_LAUNCHER_PATH, renderCodexLauncher(target.binaryPath), 0o755);
-    artifacts.push(CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH);
+    for (const file of generated.files.slice(1)) {
+      writeFileWithMode(file.path, file.content, file.mode);
+      artifacts.push(file.path);
+    }
   }
 
   return { backups, artifacts };
 }
 
 module.exports = {
-  targetBaseUrl, targetDefaultModel, writeConfig
+  targetBaseUrl, targetDefaultModel, generateConfig, writeConfig
 };

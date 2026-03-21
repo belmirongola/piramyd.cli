@@ -1,52 +1,32 @@
 #!/usr/bin/env node
 const p = require("@clack/prompts");
 const pc = require("picocolors");
-const fs = require("fs");
+const path = require("path");
 const {
-  KNOWN_TARGETS,
   CODEX_LAUNCHER_PATH,
-  CODEX_SECRET_PATH,
-  CODEX_PROFILE,
-  CODEX_MODEL_PROVIDER,
-  PIRAMYD_OPENAI_BASE_URL,
 } = require("../src/constants");
 const { normalizeConfigPath, detectConfigKind, exists, listAvailableTargets, truncateMiddle, maskApiKey } = require("../src/utils");
-const { parseTomlSections } = require("../src/toml");
 const { loadCatalog } = require("../src/catalog");
-const { targetBaseUrl, targetDefaultModel, writeConfig } = require("../src/patchers");
-
-function uniqueModels(models) {
-  const seen = new Set();
-  const list = [];
-  for (const entry of models || []) {
-    if (!entry || typeof entry !== "object") continue;
-    const id = String(entry.id || "").trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    list.push({ ...entry, id, name: String(entry.name || id) });
-  }
-  return list;
-}
-
-function applyCatalogSelection(catalog, selectedDefaultModelId, extraModels = []) {
-  const merged = uniqueModels([...(catalog.models || []), ...extraModels]);
-  return {
-    ...catalog,
-    models: merged,
-    defaultModelId: String(selectedDefaultModelId || "").trim(),
-  };
-}
-
-function findModelById(models, modelId) {
-  const wanted = String(modelId || "").trim().toLowerCase();
-  if (!wanted) return null;
-  return (models || []).find((model) => String(model.id || "").trim().toLowerCase() === wanted) || null;
-}
+const { targetBaseUrl, targetDefaultModel, writeConfig, generateConfig } = require("../src/patchers");
+const { getExistingApiKey, findReusableApiKey, targetNeedsRepair } = require("../src/diagnosis");
+const { FALLBACK_DEFAULT_MODEL, buildEmergencyCatalog, uniqueModels, applyCatalogSelection, findModelById } = require("../src/emergency-catalog");
 
 async function askModelDefaultSelection(catalog) {
+  if (catalog.sourceType === "local-fallback") {
+    p.log.warn(`Using emergency fallback model: ${FALLBACK_DEFAULT_MODEL}`);
+    return { defaultModelId: FALLBACK_DEFAULT_MODEL, addedModels: [] };
+  }
+
   const models = uniqueModels(catalog.models || []);
   if (!models.length) {
-    return { defaultModelId: "", addedModels: [] };
+    return { defaultModelId: FALLBACK_DEFAULT_MODEL, addedModels: [{
+      id: FALLBACK_DEFAULT_MODEL,
+      name: "Claude Sonnet 4.5",
+      reasoning: true,
+      input: ["text"],
+      contextWindow: 200000,
+      maxTokens: 8192,
+    }] };
   }
 
   const tier = String(catalog.tier || "unknown").toUpperCase();
@@ -118,77 +98,6 @@ async function askModelDefaultSelection(catalog) {
   }
 }
 
-function getExistingApiKey(target) {
-  try {
-    if (target.kind === "claude") {
-      const config = JSON.parse(fs.readFileSync(target.path, "utf8"));
-      return String(config.env?.ANTHROPIC_AUTH_TOKEN || "").trim();
-    }
-    if (target.kind === "codex") {
-      if (!exists(CODEX_SECRET_PATH)) return "";
-      const raw = fs.readFileSync(CODEX_SECRET_PATH, "utf8");
-      const match = raw.match(/^\s*OPENAI_API_KEY=(.+)\s*$/m);
-      if (!match) return "";
-      return String(match[1]).trim().replace(/^['"]|['"]$/g, "");
-    }
-    if (target.kind === "openclaw") {
-      const config = JSON.parse(fs.readFileSync(target.path, "utf8"));
-      return String(config.models?.providers?.piramyd?.apiKey || "").trim();
-    }
-    if (["gemini", "qwen"].includes(target.kind)) {
-      const config = JSON.parse(fs.readFileSync(target.path, "utf8"));
-      return String(config.security?.auth?.apiKey || "").trim();
-    }
-    if (target.kind === "opencode") {
-      const config = JSON.parse(fs.readFileSync(target.path, "utf8"));
-      return String(config.providers?.piramyd?.apiKey || "").trim();
-    }
-    const raw = fs.readFileSync(target.path, "utf8");
-    const { sections } = parseTomlSections(raw);
-    const provider = sections.find((section) => section.header === "providers.piramyd");
-    if (!provider) return "";
-    for (const line of provider.lines.slice(1)) {
-      const match = line.match(/^\s*api_key\s*=\s*"([^"]*)"/);
-      if (match) return match[1].trim();
-    }
-  } catch {}
-  return "";
-}
-function findReusableApiKey(targets, selectedTarget) {
-  const ordered = [selectedTarget, ...targets.filter((target) => target.path !== selectedTarget.path)];
-  for (const target of ordered) {
-    const apiKey = getExistingApiKey(target);
-    if (apiKey.startsWith("sk-")) return apiKey;
-  }
-  return "";
-}
-function codexHasExpectedConfig(filePath) {
-  if (!exists(filePath)) return false;
-  const raw = fs.readFileSync(filePath, "utf8");
-  const profileHeader = `[profiles.${CODEX_PROFILE}]`;
-  const providerHeader = `[model_providers.${CODEX_MODEL_PROVIDER}]`;
-  const providerLine = `model_provider = "${CODEX_MODEL_PROVIDER}"`;
-  const baseUrlLine = `base_url = "${PIRAMYD_OPENAI_BASE_URL}"`;
-  const wireApiLine = 'wire_api = "responses"';
-  return raw.includes(profileHeader)
-    && raw.includes(providerHeader)
-    && raw.includes(providerLine)
-    && raw.includes(baseUrlLine)
-    && raw.includes(wireApiLine);
-}
-function codexLauncherLooksHealthy() {
-  if (!exists(CODEX_LAUNCHER_PATH)) return false;
-  const raw = fs.readFileSync(CODEX_LAUNCHER_PATH, "utf8");
-  return raw.includes(PIRAMYD_OPENAI_BASE_URL) && raw.includes(`-p ${CODEX_PROFILE}`);
-}
-function targetNeedsRepair(target) {
-  const key = getExistingApiKey(target);
-  if (!key || !key.startsWith("sk-")) return true;
-  if (target.kind !== "codex") return false;
-  if (!codexHasExpectedConfig(target.path)) return true;
-  if (!codexLauncherLooksHealthy()) return true;
-  return false;
-}
 async function askCustomConfig() {
   while (true) {
     const customPath = normalizeConfigPath(
@@ -319,6 +228,18 @@ function showSuccess(result) {
   const hasCodex = result.results.some(r => r.target.kind === "codex");
   if (hasCodex) {
     p.log.info("Bare `codex` is unchanged. Use `codex-piramyd` for the Piramyd route.");
+    const launcherDir = path.dirname(CODEX_LAUNCHER_PATH);
+    const pathEntries = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+    if (!pathEntries.includes(launcherDir)) {
+      p.log.warn(`Add ${launcherDir} to PATH so 'codex-piramyd' is executable from any shell.`);
+      if (process.platform === "win32") {
+        p.log.message(`Tip (Windows): setx PATH "%PATH%;${launcherDir}"`);
+      } else {
+        const shell = process.env.SHELL || "";
+        const profileFile = shell.includes("zsh") ? "~/.zshrc" : "~/.bashrc";
+        p.log.message(`Tip (Linux/macOS): echo 'export PATH="${launcherDir}:$PATH"' >> ${profileFile}`);
+      }
+    }
   }
 
   allLines.push(`Next:    ${pc.bold(commands.join(" | "))}`);
@@ -385,8 +306,8 @@ async function runDoctor() {
     if (!catalog.models.length) throw new Error("empty catalog");
     spinner.stop(`Catalog refreshed: ${catalog.models.length} models found.`);
   } catch (err) {
-    spinner.stop(`Failed to refresh catalog: ${err.message}`, 1);
-    process.exit(1);
+    catalog = buildEmergencyCatalog();
+    spinner.stop(`Catalog refresh failed (${err.message}). Using fallback model ${FALLBACK_DEFAULT_MODEL}.`);
   }
 
   const results = [];
@@ -402,7 +323,25 @@ async function runDoctor() {
   p.outro("Doctor completed successfully!");
 }
 async function main() {
-  if (process.argv.includes("doctor")) {
+  const args = process.argv.slice(2);
+  const isDryRun = args.includes("--dry-run");
+
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+Usage: piramyd [command] [options]
+
+Commands:
+  (default)     Interactive onboarding wizard
+  doctor        Auto-detect and repair broken configurations
+
+Options:
+  --dry-run     Preview changes without writing any files
+  --help, -h    Show this help message
+`);
+    process.exit(0);
+  }
+
+  if (args.includes("doctor")) {
     return runDoctor();
   }
 
@@ -436,8 +375,8 @@ async function main() {
     if (!catalog.models.length) throw new Error("empty catalog");
     spinner.stop(`Catalog loaded: ${catalog.models.length} text/code models found. (Tier: ${catalog.tier.toUpperCase()})`);
   } catch (err) {
-    spinner.stop(`Failed to load catalog: ${err.message}`, 1);
-    throw err;
+    catalog = buildEmergencyCatalog();
+    spinner.stop(`Catalog load failed (${err.message}). Continuing with fallback model ${FALLBACK_DEFAULT_MODEL}.`);
   }
 
   const modelSelection = await askModelDefaultSelection(catalog);
@@ -447,6 +386,20 @@ async function main() {
   if (!shouldApply) {
     p.cancel("No files were changed.");
     process.exit(0);
+  }
+
+  if (isDryRun) {
+    p.log.step(pc.cyan("Dry-run mode — no files will be written."));
+    for (const target of selectedTargets) {
+      const preview = generateConfig(target, apiKey, catalog);
+      p.log.message(`\n${pc.bold(`── ${target.label} (${target.path}):`)}`);
+      for (const file of preview.files) {
+        const label = file.path === target.path ? "config" : path.basename(file.path);
+        p.log.message(`${pc.dim(`[${label}]`)}\n${file.content.slice(0, 2000)}${file.content.length > 2000 ? "\n...truncated" : ""}`);
+      }
+    }
+    p.outro("Dry-run complete. No files were modified.");
+    return;
   }
 
   const results = [];
