@@ -96,7 +96,7 @@ function testAggregateErrorFriendlyFormatting() {
 
 function testFallbackModelIdConstant() {
   const emergencySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'emergency-catalog.js'), 'utf8');
-  assert.strictEqual(emergencySource.includes('FALLBACK_DEFAULT_MODEL = "claude-sonnet-4.5"'), true);
+  assert.strictEqual(emergencySource.includes('FALLBACK_DEFAULT_MODEL = "claude-sonnet-4-6"'), true);
 }
 
 run();

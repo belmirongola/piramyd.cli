@@ -7,16 +7,16 @@ const {
 } = require('../src/emergency-catalog');
 
 describe('emergency-catalog', () => {
-  test('FALLBACK_DEFAULT_MODEL is claude-sonnet-4.5', () => {
-    expect(FALLBACK_DEFAULT_MODEL).toBe('claude-sonnet-4.5');
+  test('FALLBACK_DEFAULT_MODEL is claude-sonnet-4-6', () => {
+    expect(FALLBACK_DEFAULT_MODEL).toBe('claude-sonnet-4-6');
   });
 
   test('buildEmergencyCatalog returns valid catalog', () => {
     const catalog = buildEmergencyCatalog();
     expect(catalog.sourceType).toBe('local-fallback');
-    expect(catalog.models).toHaveLength(1);
-    expect(catalog.models[0].id).toBe('claude-sonnet-4.5');
-    expect(catalog.defaultModelId).toBe('claude-sonnet-4.5');
+    expect(catalog.models).toHaveLength(4);
+    expect(catalog.models[0].id).toBe('claude-opus-4.6');
+    expect(catalog.defaultModelId).toBe('claude-sonnet-4-6');
     expect(catalog.warning).toBeTruthy();
   });
 
@@ -59,7 +59,7 @@ describe('emergency-catalog', () => {
   });
 
   test('findModelById finds model case-insensitively', () => {
-    const models = [{ id: 'GPT-4o' }, { id: 'claude-sonnet-4.5' }];
+    const models = [{ id: 'GPT-4o' }, { id: 'claude-sonnet-4-6' }];
     expect(findModelById(models, 'gpt-4o').id).toBe('GPT-4o');
     expect(findModelById(models, 'GPT-4O').id).toBe('GPT-4o');
   });

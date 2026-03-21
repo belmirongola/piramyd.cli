@@ -25,10 +25,11 @@ const TEST_API_KEY = 'sk-test-1234567890abcdef';
 const TEST_CATALOG = {
   tier: 'free',
   models: [
-    { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', reasoning: true, input: ['text'], contextWindow: 200000, maxTokens: 8192 },
+    { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', reasoning: true, input: ['text', 'image'], contextWindow: 1000000, maxTokens: 128000 },
+    { id: 'claude-opus-4.6', name: 'Claude Opus 4.6', reasoning: true, input: ['text', 'image'], contextWindow: 1000000, maxTokens: 128000 },
     { id: 'gpt-4o', name: 'GPT-4o', reasoning: false, input: ['text', 'image'], contextWindow: 128000, maxTokens: 4096 },
   ],
-  defaultModelId: 'claude-sonnet-4.5',
+  defaultModelId: 'claude-sonnet-4-6',
 };
 
 // ─── targetBaseUrl ───────────────────────────────────────────────
@@ -52,8 +53,8 @@ describe('targetDefaultModel', () => {
   const models = TEST_CATALOG.models;
 
   test('claude picks sonnet when available', () => {
-    const result = targetDefaultModel({ kind: 'claude' }, models, 'free', 'claude-sonnet-4.5');
-    expect(result).toBe('claude-sonnet-4.5');
+    const result = targetDefaultModel({ kind: 'claude' }, models, 'free', 'claude-sonnet-4-6');
+    expect(result).toBe('claude-sonnet-4-6');
   });
 
   test('openclaw prefixes model with piramyd/', () => {
@@ -62,8 +63,8 @@ describe('targetDefaultModel', () => {
   });
 
   test('codex does NOT prefix model', () => {
-    const result = targetDefaultModel({ kind: 'codex' }, models, 'free', 'claude-sonnet-4.5');
-    expect(result).toBe('claude-sonnet-4.5');
+    const result = targetDefaultModel({ kind: 'codex' }, models, 'free', 'claude-sonnet-4-6');
+    expect(result).toBe('claude-sonnet-4-6');
   });
 
   test('kimi prefixes model with piramyd/', () => {

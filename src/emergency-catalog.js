@@ -1,4 +1,4 @@
-const FALLBACK_DEFAULT_MODEL = "claude-sonnet-4.5";
+const FALLBACK_DEFAULT_MODEL = "claude-sonnet-4-6";
 
 /**
  * Hardcoded emergency catalog used when remote fetch fails.
@@ -11,12 +11,36 @@ function buildEmergencyCatalog() {
     warning: "Catalog fetch failed. Continuing with local fallback model list.",
     models: [
       {
-        id: FALLBACK_DEFAULT_MODEL,
-        name: "Claude Sonnet 4.5",
+        id: "claude-opus-4.6",
+        name: "Claude Opus 4.6",
         reasoning: true,
-        input: ["text"],
+        input: ["text", "image"],
+        contextWindow: 1000000,
+        maxTokens: 128000,
+      },
+      {
+        id: FALLBACK_DEFAULT_MODEL,
+        name: "Claude Sonnet 4.6",
+        reasoning: true,
+        input: ["text", "image"],
+        contextWindow: 1000000,
+        maxTokens: 128000,
+      },
+      {
+        id: "claude-sonnet-4",
+        name: "Claude Sonnet 4",
+        reasoning: true,
+        input: ["text", "image"],
         contextWindow: 200000,
-        maxTokens: 8192,
+        maxTokens: 64000,
+      },
+      {
+        id: "claude-opus-4-1",
+        name: "Claude Opus 4.1",
+        reasoning: true,
+        input: ["text", "image"],
+        contextWindow: 200000,
+        maxTokens: 32000,
       },
     ],
     defaultModelId: FALLBACK_DEFAULT_MODEL,

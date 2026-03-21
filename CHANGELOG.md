@@ -39,6 +39,9 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 - `.gitignore` expanded: covers `.env`, coverage, OS artifacts, IDE files.
 - Unused imports cleaned from `bin/piramyd.js`.
 - ESLint warnings resolved (unused vars, catch bindings).
+- Emergency catalog updated with current API models (`claude-opus-4.6`, `claude-sonnet-4-6`, `claude-sonnet-4`, `claude-opus-4-1`). Model IDs use bare names without tier prefixes — the API handles routing.
+- `FALLBACK_DEFAULT_MODEL` changed from `claude-sonnet-4.5` → `claude-sonnet-4-6`.
+- Claude Code patcher now sets `ANTHROPIC_DEFAULT_OPUS_MODEL` when opus models are available in the catalog.
 
 ## [0.1.9]
 
