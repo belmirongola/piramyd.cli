@@ -1,7 +1,6 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { targetBaseUrl, targetDefaultModel, writeConfig } = require('../src/patchers');
 
 function mkTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'piramyd-patcher-test-'));
@@ -32,355 +31,353 @@ const TEST_CATALOG = {
   defaultModelId: 'claude-sonnet-4-6',
 };
 
-// ─── targetBaseUrl ───────────────────────────────────────────────
+describe('patchers', () => {
+  let tmpHome;
+  let patchers;
 
-describe('targetBaseUrl', () => {
-  test('claude returns Anthropic base URL', () => {
-    expect(targetBaseUrl({ kind: 'claude' })).toBe('https://api.piramyd.cloud');
+  beforeEach(() => {
+    jest.resetModules();
+    tmpHome = mkTmpDir();
+    jest.spyOn(os, 'homedir').mockReturnValue(tmpHome);
+    patchers = require('../src/patchers');
   });
 
-  test.each(['codex', 'kimi', 'openclaw', 'gemini', 'qwen', 'opencode'])(
-    '%s returns OpenAI base URL',
-    (kind) => {
-      expect(targetBaseUrl({ kind })).toBe('https://api.piramyd.cloud/v1');
-    }
-  );
-});
-
-// ─── targetDefaultModel ──────────────────────────────────────────
-
-describe('targetDefaultModel', () => {
-  const models = TEST_CATALOG.models;
-
-  test('claude picks sonnet when available', () => {
-    const result = targetDefaultModel({ kind: 'claude' }, models, 'free', 'claude-sonnet-4-6');
-    expect(result).toBe('claude-sonnet-4-6');
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
-  test('openclaw prefixes model with piramyd/', () => {
-    const result = targetDefaultModel({ kind: 'openclaw' }, models, 'free', 'gpt-4o');
-    expect(result).toBe('piramyd/gpt-4o');
+  describe('targetBaseUrl', () => {
+    test('claude returns Anthropic base URL', () => {
+      expect(patchers.targetBaseUrl({ kind: 'claude' })).toBe('https://api.piramyd.cloud');
+    });
+
+    test.each(['codex', 'kimi', 'openclaw', 'gemini', 'qwen', 'opencode'])(
+      '%s returns OpenAI base URL',
+      (kind) => {
+        expect(patchers.targetBaseUrl({ kind })).toBe('https://api.piramyd.cloud/v1');
+      }
+    );
   });
 
-  test('codex does NOT prefix model', () => {
-    const result = targetDefaultModel({ kind: 'codex' }, models, 'free', 'claude-sonnet-4-6');
-    expect(result).toBe('claude-sonnet-4-6');
+  describe('targetDefaultModel', () => {
+    const models = TEST_CATALOG.models;
+
+    test('claude picks sonnet when available', () => {
+      const result = patchers.targetDefaultModel({ kind: 'claude' }, models, 'free', 'claude-sonnet-4-6');
+      expect(result).toBe('claude-sonnet-4-6');
+    });
+
+    test('openclaw prefixes model with piramyd/', () => {
+      const result = patchers.targetDefaultModel({ kind: 'openclaw' }, models, 'free', 'gpt-4o');
+      expect(result).toBe('piramyd/gpt-4o');
+    });
+
+    test('codex does NOT prefix model', () => {
+      const result = patchers.targetDefaultModel({ kind: 'codex' }, models, 'free', 'claude-sonnet-4-6');
+      expect(result).toBe('claude-sonnet-4-6');
+    });
+
+    test('kimi prefixes model with piramyd/', () => {
+      const result = patchers.targetDefaultModel({ kind: 'kimi' }, models, 'free', 'gpt-4o');
+      expect(result).toBe('piramyd/gpt-4o');
+    });
   });
 
-  test('kimi prefixes model with piramyd/', () => {
-    const result = targetDefaultModel({ kind: 'kimi' }, models, 'free', 'gpt-4o');
-    expect(result).toBe('piramyd/gpt-4o');
-  });
-});
+  describe('writeConfig — openclaw', () => {
+    test('creates config from missing file', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'openclaw', path: path.join(dir, '.openclaw', 'openclaw.json') };
+      const result = patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
 
-// ─── OpenClaw patcher ────────────────────────────────────────────
+      const config = readJson(target.path);
+      expect(config.models.providers.piramyd.baseUrl).toBe('https://api.piramyd.cloud/v1');
+      expect(config.models.providers.piramyd.apiKey).toBe(TEST_API_KEY);
+      expect(config.agents.defaults.model.primary).toMatch(/^piramyd\//);
+      expect(result.backups).toEqual([]);
+    });
 
-describe('writeConfig — openclaw', () => {
-  test('creates config from missing file', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'openclaw', path: path.join(dir, '.openclaw', 'openclaw.json') };
-    const result = writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+    test('preserves existing fields', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'openclaw', path: path.join(dir, 'openclaw.json') };
+      write(target.path, JSON.stringify({ customField: 'keep-me', models: { extra: true } }, null, 2));
 
-    const config = readJson(target.path);
-    expect(config.models.providers.piramyd.baseUrl).toBe('https://api.piramyd.cloud/v1');
-    expect(config.models.providers.piramyd.apiKey).toBe(TEST_API_KEY);
-    expect(config.agents.defaults.model.primary).toMatch(/^piramyd\//);
-    expect(result.backups).toEqual([]);
-  });
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const config = readJson(target.path);
+      expect(config.customField).toBe('keep-me');
+      expect(config.models.extra).toBe(true);
+      expect(config.models.providers.piramyd.apiKey).toBe(TEST_API_KEY);
+    });
 
-  test('preserves existing fields', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'openclaw', path: path.join(dir, 'openclaw.json') };
-    write(target.path, JSON.stringify({ customField: 'keep-me', models: { extra: true } }, null, 2));
-
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const config = readJson(target.path);
-    expect(config.customField).toBe('keep-me');
-    expect(config.models.extra).toBe(true);
-    expect(config.models.providers.piramyd.apiKey).toBe(TEST_API_KEY);
-  });
-
-  test('idempotency — second write produces identical output', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'openclaw', path: path.join(dir, 'openclaw.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const first = read(target.path);
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const second = read(target.path);
-    // Remove meta.lastTouchedAt which changes
-    const normalize = (s) => s.replace(/"lastTouchedAt":\s*"[^"]*"/g, '"lastTouchedAt":"X"');
-    expect(normalize(second)).toBe(normalize(first));
-  });
-});
-
-// ─── Claude patcher ──────────────────────────────────────────────
-
-describe('writeConfig — claude', () => {
-  test('creates config from missing file', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'claude', path: path.join(dir, '.claude', 'settings.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-
-    const config = readJson(target.path);
-    expect(config.env.ANTHROPIC_BASE_URL).toBe('https://api.piramyd.cloud');
-    expect(config.env.ANTHROPIC_AUTH_TOKEN).toBe(TEST_API_KEY);
+    test('idempotency — second write produces identical output', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'openclaw', path: path.join(dir, 'openclaw.json') };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const first = read(target.path);
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const second = read(target.path);
+      const normalize = (value) => value.replace(/"lastTouchedAt":\s*"[^"]*"/g, '"lastTouchedAt":"X"');
+      expect(normalize(second)).toBe(normalize(first));
+    });
   });
 
-  test('preserves existing fields', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'claude', path: path.join(dir, 'settings.json') };
-    write(target.path, JSON.stringify({ permissions: { allow: ['tool1'] }, env: { MY_VAR: 'hello' } }, null, 2));
+  describe('writeConfig — claude', () => {
+    test('creates isolated config and launcher', () => {
+      const target = { kind: 'claude', path: path.join(tmpHome, '.claude-piramyd', 'settings.json'), binaryPath: '/usr/local/bin/claude' };
 
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const config = readJson(target.path);
-    expect(config.permissions.allow).toContain('tool1');
-    expect(config.env.MY_VAR).toBe('hello');
-    expect(config.env.ANTHROPIC_AUTH_TOKEN).toBe(TEST_API_KEY);
+      const result = patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const config = readJson(target.path);
+
+      expect(config.env.ANTHROPIC_BASE_URL).toBe('https://api.piramyd.cloud');
+      expect(config.env.ANTHROPIC_AUTH_TOKEN).toBe(TEST_API_KEY);
+      expect(config.model).toBe('claude-sonnet-4-6');
+
+      const launcherPath = result.artifacts.find((artifact) => artifact.includes('claude-piramyd'));
+      expect(launcherPath).toBeTruthy();
+      const launcher = read(launcherPath);
+      expect(launcher).toContain('CLAUDE_CONFIG_DIR=');
+      expect(launcher).toContain('.claude-piramyd');
+      expect(launcher).toContain('ANTHROPIC_BASE_URL=');
+      expect(launcher).toContain('https://api.piramyd.cloud');
+      expect(launcher).toContain('ANTHROPIC_API_KEY=');
+      expect(launcher).toContain('--bare');
+    });
+
+    test('preserves existing fields in isolated settings', () => {
+      const target = { kind: 'claude', path: path.join(tmpHome, '.claude-piramyd', 'settings.json'), binaryPath: 'claude' };
+      write(target.path, JSON.stringify({ permissions: { allow: ['tool1'] }, env: { MY_VAR: 'hello' } }, null, 2));
+
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const config = readJson(target.path);
+      expect(config.permissions.allow).toContain('tool1');
+      expect(config.env.MY_VAR).toBe('hello');
+      expect(config.env.ANTHROPIC_AUTH_TOKEN).toBe(TEST_API_KEY);
+      expect(config.model).toBe('claude-sonnet-4-6');
+    });
+
+    test('idempotency', () => {
+      const target = { kind: 'claude', path: path.join(tmpHome, '.claude-piramyd', 'settings.json'), binaryPath: 'claude' };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const first = read(target.path);
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const second = read(target.path);
+      expect(second).toBe(first);
+    });
   });
 
-  test('idempotency', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'claude', path: path.join(dir, 'settings.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const first = read(target.path);
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const second = read(target.path);
-    expect(second).toBe(first);
-  });
-});
+  describe('writeConfig — gemini', () => {
+    test('creates config from missing file', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'gemini', path: path.join(dir, '.gemini', 'settings.json') };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
 
-// ─── Gemini patcher ──────────────────────────────────────────────
+      const config = readJson(target.path);
+      expect(config.security.auth.apiKey).toBe(TEST_API_KEY);
+      expect(config.security.auth.selectedType).toBe('gemini-api-key');
+      expect(config.security.gatewayUrl).toBe('https://api.piramyd.cloud/v1');
+    });
 
-describe('writeConfig — gemini', () => {
-  test('creates config from missing file', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'gemini', path: path.join(dir, '.gemini', 'settings.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+    test('preserves existing fields', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'gemini', path: path.join(dir, 'settings.json') };
+      write(target.path, JSON.stringify({ theme: 'dark' }, null, 2));
 
-    const config = readJson(target.path);
-    expect(config.security.auth.apiKey).toBe(TEST_API_KEY);
-    expect(config.security.auth.selectedType).toBe('gemini-api-key');
-    expect(config.security.gatewayUrl).toBe('https://api.piramyd.cloud/v1');
-  });
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const config = readJson(target.path);
+      expect(config.theme).toBe('dark');
+      expect(config.security.auth.apiKey).toBe(TEST_API_KEY);
+    });
 
-  test('preserves existing fields', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'gemini', path: path.join(dir, 'settings.json') };
-    write(target.path, JSON.stringify({ theme: 'dark' }, null, 2));
-
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const config = readJson(target.path);
-    expect(config.theme).toBe('dark');
-    expect(config.security.auth.apiKey).toBe(TEST_API_KEY);
+    test('idempotency', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'gemini', path: path.join(dir, 'settings.json') };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const first = read(target.path);
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const second = read(target.path);
+      expect(second).toBe(first);
+    });
   });
 
-  test('idempotency', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'gemini', path: path.join(dir, 'settings.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const first = read(target.path);
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const second = read(target.path);
-    expect(second).toBe(first);
-  });
-});
+  describe('writeConfig — qwen', () => {
+    test('creates config from missing file', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'qwen', path: path.join(dir, '.qwen', 'settings.json') };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
 
-// ─── Qwen patcher ────────────────────────────────────────────────
+      const config = readJson(target.path);
+      expect(config.security.auth.apiKey).toBe(TEST_API_KEY);
+      expect(config.security.gatewayUrl).toBe('https://api.piramyd.cloud/v1');
+      expect(config.model.provider).toBe('piramyd');
+      expect(config.model.name).toBeTruthy();
+    });
 
-describe('writeConfig — qwen', () => {
-  test('creates config from missing file', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'qwen', path: path.join(dir, '.qwen', 'settings.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+    test('preserves existing fields', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'qwen', path: path.join(dir, 'settings.json') };
+      write(target.path, JSON.stringify({ theme: 'light', extra: 42 }, null, 2));
 
-    const config = readJson(target.path);
-    expect(config.security.auth.apiKey).toBe(TEST_API_KEY);
-    expect(config.security.gatewayUrl).toBe('https://api.piramyd.cloud/v1');
-    expect(config.model.provider).toBe('piramyd');
-    expect(config.model.name).toBeTruthy();
-  });
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const config = readJson(target.path);
+      expect(config.theme).toBe('light');
+      expect(config.extra).toBe(42);
+      expect(config.security.auth.apiKey).toBe(TEST_API_KEY);
+    });
 
-  test('preserves existing fields', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'qwen', path: path.join(dir, 'settings.json') };
-    write(target.path, JSON.stringify({ theme: 'light', extra: 42 }, null, 2));
-
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const config = readJson(target.path);
-    expect(config.theme).toBe('light');
-    expect(config.extra).toBe(42);
-    expect(config.security.auth.apiKey).toBe(TEST_API_KEY);
+    test('idempotency', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'qwen', path: path.join(dir, 'settings.json') };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const first = read(target.path);
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const second = read(target.path);
+      expect(second).toBe(first);
+    });
   });
 
-  test('idempotency', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'qwen', path: path.join(dir, 'settings.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const first = read(target.path);
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const second = read(target.path);
-    expect(second).toBe(first);
-  });
-});
+  describe('writeConfig — opencode', () => {
+    test('creates config from missing file', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'opencode', path: path.join(dir, '.opencode', 'config.json') };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
 
-// ─── OpenCode patcher ────────────────────────────────────────────
+      const config = readJson(target.path);
+      expect(config.providers.piramyd.apiKey).toBe(TEST_API_KEY);
+      expect(config.providers.piramyd.baseUrl).toBe('https://api.piramyd.cloud/v1');
+      expect(config.providers.piramyd.type).toBe('openai');
+      expect(config.defaultProvider).toBe('piramyd');
+    });
 
-describe('writeConfig — opencode', () => {
-  test('creates config from missing file', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'opencode', path: path.join(dir, '.opencode', 'config.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+    test('preserves existing fields', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'opencode', path: path.join(dir, 'config.json') };
+      write(target.path, JSON.stringify({ providers: { other: { key: 'value' } } }, null, 2));
 
-    const config = readJson(target.path);
-    expect(config.providers.piramyd.apiKey).toBe(TEST_API_KEY);
-    expect(config.providers.piramyd.baseUrl).toBe('https://api.piramyd.cloud/v1');
-    expect(config.providers.piramyd.type).toBe('openai');
-    expect(config.defaultProvider).toBe('piramyd');
-  });
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const config = readJson(target.path);
+      expect(config.providers.other.key).toBe('value');
+      expect(config.providers.piramyd.apiKey).toBe(TEST_API_KEY);
+    });
 
-  test('preserves existing fields', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'opencode', path: path.join(dir, 'config.json') };
-    write(target.path, JSON.stringify({ providers: { other: { key: 'value' } } }, null, 2));
-
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const config = readJson(target.path);
-    expect(config.providers.other.key).toBe('value');
-    expect(config.providers.piramyd.apiKey).toBe(TEST_API_KEY);
+    test('idempotency', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'opencode', path: path.join(dir, 'config.json') };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const first = read(target.path);
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const second = read(target.path);
+      expect(second).toBe(first);
+    });
   });
 
-  test('idempotency', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'opencode', path: path.join(dir, 'config.json') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const first = read(target.path);
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const second = read(target.path);
-    expect(second).toBe(first);
-  });
-});
+  describe('writeConfig — kimi', () => {
+    test('creates config from existing empty file', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'kimi', path: path.join(dir, '.kimi', 'config.toml') };
+      write(target.path, '');
 
-// ─── Kimi patcher (TOML) ─────────────────────────────────────────
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const content = read(target.path);
+      expect(content).toContain('[providers.piramyd]');
+      expect(content).toContain('# >>> piramyd-onboard:start');
+      expect(content).toContain('# <<< piramyd-onboard:end');
+      expect(content).toContain(TEST_API_KEY);
+      expect(content).toContain('default_model');
+    });
 
-describe('writeConfig — kimi', () => {
-  test('creates config from existing empty file', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'kimi', path: path.join(dir, '.kimi', 'config.toml') };
-    write(target.path, '');
+    test('preserves user sections', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'kimi', path: path.join(dir, 'config.toml') };
+      const existing = [
+        'default_model = "old-model"',
+        '',
+        '[providers.custom]',
+        'type = "openai"',
+        'base_url = "https://custom.example.com"',
+        '',
+        '[models."custom/my-model"]',
+        'provider = "custom"',
+        'model = "my-model"',
+      ].join('\n');
+      write(target.path, existing);
 
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const content = read(target.path);
-    expect(content).toContain('[providers.piramyd]');
-    expect(content).toContain('# >>> piramyd-onboard:start');
-    expect(content).toContain('# <<< piramyd-onboard:end');
-    expect(content).toContain(TEST_API_KEY);
-    expect(content).toContain('default_model');
-  });
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const content = read(target.path);
+      expect(content).toContain('[providers.custom]');
+      expect(content).toContain('base_url = "https://custom.example.com"');
+      expect(content).toContain('[models."custom/my-model"]');
+      expect(content).toContain('[providers.piramyd]');
+      expect(content).not.toContain('"old-model"');
+    });
 
-  test('preserves user sections', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'kimi', path: path.join(dir, 'config.toml') };
-    const existing = [
-      'default_model = "old-model"',
-      '',
-      '[providers.custom]',
-      'type = "openai"',
-      'base_url = "https://custom.example.com"',
-      '',
-      '[models."custom/my-model"]',
-      'provider = "custom"',
-      'model = "my-model"',
-    ].join('\n');
-    write(target.path, existing);
+    test('idempotency', () => {
+      const dir = mkTmpDir();
+      const target = { kind: 'kimi', path: path.join(dir, 'config.toml') };
+      write(target.path, 'default_model = "x"\n');
 
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const content = read(target.path);
-    // User sections survive
-    expect(content).toContain('[providers.custom]');
-    expect(content).toContain('base_url = "https://custom.example.com"');
-    expect(content).toContain('[models."custom/my-model"]');
-    // Piramyd sections present
-    expect(content).toContain('[providers.piramyd]');
-    // default_model was updated (not the old value)
-    expect(content).not.toContain('"old-model"');
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const first = read(target.path);
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const second = read(target.path);
+      expect(second).toBe(first);
+    });
   });
 
-  test('idempotency', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'kimi', path: path.join(dir, 'config.toml') };
-    write(target.path, 'default_model = "x"\n');
+  describe('writeConfig — codex', () => {
+    test('creates config from missing file', () => {
+      const target = { kind: 'codex', path: path.join(tmpHome, '.codex', 'config.toml') };
 
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const first = read(target.path);
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const second = read(target.path);
-    expect(second).toBe(first);
-  });
-});
+      const result = patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const content = read(target.path);
 
-// ─── Codex patcher (TOML + artifacts) ────────────────────────────
+      expect(content).toContain('[profiles.piramyd]');
+      expect(content).toContain('[model_providers.piramyd]');
+      expect(content).toContain('# >>> piramyd-onboard:start');
+      expect(content).toContain('# <<< piramyd-onboard:end');
+      expect(content).toContain('base_url = "https://api.piramyd.cloud/v1"');
+      expect(content).toContain('wire_api = "responses"');
+      expect(result.artifacts.length).toBe(2);
+    });
 
-describe('writeConfig — codex', () => {
-  test('creates config from missing file', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'codex', path: path.join(dir, '.codex', 'config.toml') };
+    test('preserves user sections', () => {
+      const target = { kind: 'codex', path: path.join(tmpHome, '.codex', 'config.toml') };
+      const existing = [
+        '[profiles.default]',
+        'model_provider = "openai"',
+        'model = "gpt-4o"',
+      ].join('\n');
+      write(target.path, existing);
 
-    const result = writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const content = read(target.path);
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const content = read(target.path);
+      expect(content).toContain('[profiles.default]');
+      expect(content).toContain('model_provider = "openai"');
+      expect(content).toContain('[profiles.piramyd]');
+    });
 
-    expect(content).toContain('[profiles.piramyd]');
-    expect(content).toContain('[model_providers.piramyd]');
-    expect(content).toContain('# >>> piramyd-onboard:start');
-    expect(content).toContain('# <<< piramyd-onboard:end');
-    expect(content).toContain('base_url = "https://api.piramyd.cloud/v1"');
-    expect(content).toContain('wire_api = "responses"');
-    expect(result.artifacts.length).toBe(2);
-  });
+    test('idempotency', () => {
+      const target = { kind: 'codex', path: path.join(tmpHome, '.codex', 'config.toml') };
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const first = read(target.path);
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const second = read(target.path);
+      expect(second).toBe(first);
+    });
 
-  test('preserves user sections', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'codex', path: path.join(dir, 'config.toml') };
-    const existing = [
-      '[profiles.default]',
-      'model_provider = "openai"',
-      'model = "gpt-4o"',
-    ].join('\n');
-    write(target.path, existing);
+    test('creates secret env file and launcher', () => {
+      const target = { kind: 'codex', path: path.join(tmpHome, '.codex', 'config.toml') };
+      const result = patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
 
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const content = read(target.path);
-    expect(content).toContain('[profiles.default]');
-    expect(content).toContain('model_provider = "openai"');
-    expect(content).toContain('[profiles.piramyd]');
-  });
+      const secretPath = result.artifacts.find((artifact) => artifact.includes('piramyd.env'));
+      expect(secretPath).toBeTruthy();
+      const secret = read(secretPath);
+      expect(secret).toContain(TEST_API_KEY);
+      expect(secret).toContain('OPENAI_API_KEY=');
 
-  test('idempotency', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'codex', path: path.join(dir, 'config.toml') };
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const first = read(target.path);
-    writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-    const second = read(target.path);
-    expect(second).toBe(first);
-  });
-
-  test('creates secret env file and launcher', () => {
-    const dir = mkTmpDir();
-    const target = { kind: 'codex', path: path.join(dir, 'config.toml') };
-    const result = writeConfig(target, TEST_API_KEY, TEST_CATALOG);
-
-    // Secret file exists and contains the API key
-    const secretPath = result.artifacts.find((a) => a.includes('piramyd.env'));
-    expect(secretPath).toBeTruthy();
-    const secret = read(secretPath);
-    expect(secret).toContain(TEST_API_KEY);
-    expect(secret).toContain('OPENAI_API_KEY=');
-
-    // Launcher exists and contains the profile
-    const launcherPath = result.artifacts.find((a) => a.includes('codex-piramyd'));
-    expect(launcherPath).toBeTruthy();
-    const launcher = read(launcherPath);
-    expect(launcher).toContain('-p piramyd');
-    expect(launcher).toContain('https://api.piramyd.cloud/v1');
+      const launcherPath = result.artifacts.find((artifact) => artifact.includes('codex-piramyd'));
+      expect(launcherPath).toBeTruthy();
+      const launcher = read(launcherPath);
+      expect(launcher).toContain('-p piramyd');
+      expect(launcher).toContain('https://api.piramyd.cloud/v1');
+    });
   });
 });

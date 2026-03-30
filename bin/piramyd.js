@@ -209,7 +209,7 @@ function showSuccess(result) {
     let command = "Run `openclaw models list`.";
     if (res.target.kind === "kimi") command = "Run `kimi` and then `/model`.";
     if (res.target.kind === "codex") command = "Run `codex-piramyd` and then `/model`.";
-    if (res.target.kind === "claude") command = "Run `claude` and then `/model`.";
+    if (res.target.kind === "claude") command = "Run `claude-piramyd` and then `/model`.";
     if (res.target.kind === "gemini") command = "Run `gemini` to test.";
     if (res.target.kind === "qwen") command = "Run `qwen` to test.";
     if (res.target.kind === "opencode") command = "Run `opencode` to test.";

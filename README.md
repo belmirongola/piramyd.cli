@@ -54,9 +54,10 @@ npx piramyd doctor
   - Mantém `base_url` cloud (`https://api.piramyd.cloud/v1`) e aceita `PIRAMYD_DEBUG=1` para diagnosticar env/base_url/fingerprint de chave
 
 - **Claude Code**
-  - Atualiza `~/.claude/settings.json`
-  - Configura `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`
-  - Ajusta aliases/defaults Claude quando disponíveis no catálogo
+  - Cria config isolada em `~/.claude-piramyd/settings.json`
+  - Cria launcher `claude-piramyd` em `~/.local/bin` (ou caminho equivalente no Windows)
+  - Configura `CLAUDE_CONFIG_DIR`, `ANTHROPIC_BASE_URL` e `ANTHROPIC_API_KEY` sem tocar no `~/.claude` padrão
+  - Ajusta modelos default Claude quando disponíveis no catálogo
 
 - **Kimi Code**
   - Atualiza `~/.kimi/config.toml`

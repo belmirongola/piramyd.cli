@@ -13,9 +13,9 @@ function write(filePath, content) {
 }
 
 describe('diagnosis — getExistingApiKey', () => {
-  test('reads claude API key from JSON', () => {
+  test('reads claude API key from isolated JSON', () => {
     const dir = mkTmpDir();
-    const configPath = path.join(dir, 'settings.json');
+    const configPath = path.join(dir, '.claude-piramyd', 'settings.json');
     write(configPath, JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'sk-claude-key-123' } }));
 
     const key = getExistingApiKey({ kind: 'claude', path: configPath });

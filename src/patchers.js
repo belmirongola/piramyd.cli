@@ -1,8 +1,10 @@
 const fs = require("fs");
 const os = require("os");
+const path = require("path");
 const {
   CODEX_PROFILE, CODEX_MODEL_PROVIDER, GENERATED_START, GENERATED_END,
-  PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL, CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH, IS_WINDOWS
+  PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL, CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH,
+  CLAUDE_SETTINGS_PATH, CLAUDE_LAUNCHER_PATH, IS_WINDOWS
 } = require("./constants");
 const {
   exists, escapeRegex, renderTomlString, renderTomlArray, renderShellString,
@@ -354,9 +356,47 @@ function updateClaudeConfig(filePath, apiKey, models, userTier = "free", selecte
 
   config.env = env;
   const defaultModelId = targetDefaultModel({kind: "claude"}, models, userTier, selectedDefaultModelId);
-  if (!config.model && defaultModelId !== "manual selection") config.model = defaultModelId;
+  if (defaultModelId !== "manual selection") config.model = defaultModelId;
 
   return JSON.stringify(config, null, 2) + os.EOL;
+}
+
+function renderClaudeLauncherUnix(binaryPath, apiKey) {
+  return [
+    "#!/bin/sh",
+    "set -eu",
+    `CLAUDE_BIN=${renderShellString(binaryPath || "claude")}`,
+    `CLAUDE_CONFIG_DIR=${renderShellString(path.dirname(CLAUDE_SETTINGS_PATH))}`,
+    `ANTHROPIC_BASE_URL=${renderShellString(PIRAMYD_ANTHROPIC_BASE_URL)}`,
+    `ANTHROPIC_API_KEY=${renderShellString(apiKey.trim())}`,
+    "",
+    "export CLAUDE_CONFIG_DIR",
+    "export ANTHROPIC_BASE_URL",
+    "export ANTHROPIC_API_KEY",
+    "",
+    'exec "$CLAUDE_BIN" --bare "$@"',
+    "",
+  ].join("\n");
+}
+
+function renderClaudeLauncherWindows(binaryPath, apiKey) {
+  const claudeBin = binaryPath || "claude";
+  return [
+    "@echo off",
+    "setlocal",
+    `set "CLAUDE_BIN=${claudeBin}"`,
+    `set "CLAUDE_CONFIG_DIR=${path.dirname(CLAUDE_SETTINGS_PATH)}"`,
+    `set "ANTHROPIC_BASE_URL=${PIRAMYD_ANTHROPIC_BASE_URL}"`,
+    `set "ANTHROPIC_API_KEY=${apiKey.trim()}"`,
+    '"%CLAUDE_BIN%" --bare %*',
+    "",
+  ].join("\r\n");
+}
+
+function renderClaudeLauncher(binaryPath, apiKey) {
+  return IS_WINDOWS
+    ? renderClaudeLauncherWindows(binaryPath, apiKey)
+    : renderClaudeLauncherUnix(binaryPath, apiKey);
 }
 
 function updateGeminiConfig(filePath, apiKey) {
@@ -419,6 +459,10 @@ function generateConfig(target, apiKey, catalog) {
     result.files.push({ path: CODEX_SECRET_PATH, content: secretContent, mode: 0o600 });
     result.files.push({ path: CODEX_LAUNCHER_PATH, content: launcherContent, mode: 0o755 });
   }
+  if (target.kind === "claude") {
+    const launcherContent = renderClaudeLauncher(target.binaryPath, apiKey);
+    result.files.push({ path: CLAUDE_LAUNCHER_PATH, content: launcherContent, mode: 0o755 });
+  }
   return result;
 }
 
@@ -435,10 +479,12 @@ function writeConfig(target, apiKey, catalog, options = {}) {
   writeFileWithMode(target.path, generated.config);
 
   const artifacts = [];
-  if (target.kind === "codex") {
-    backupIfPresent(CODEX_SECRET_PATH, backups);
-    backupIfPresent(CODEX_LAUNCHER_PATH, backups);
-    for (const file of generated.files.slice(1)) {
+  if (target.kind === "codex" || target.kind === "claude") {
+    const extraFiles = generated.files.slice(1);
+    if (target.kind === "codex") backupIfPresent(CODEX_SECRET_PATH, backups);
+    if (target.kind === "codex") backupIfPresent(CODEX_LAUNCHER_PATH, backups);
+    if (target.kind === "claude") backupIfPresent(CLAUDE_LAUNCHER_PATH, backups);
+    for (const file of extraFiles) {
       writeFileWithMode(file.path, file.content, file.mode);
       artifacts.push(file.path);
     }

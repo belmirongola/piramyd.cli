@@ -1,5 +1,9 @@
 const fs = require("fs");
-const { CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH, CODEX_PROFILE, CODEX_MODEL_PROVIDER, PIRAMYD_OPENAI_BASE_URL } = require("./constants");
+const path = require("path");
+const {
+  CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH, CODEX_PROFILE, CODEX_MODEL_PROVIDER, PIRAMYD_OPENAI_BASE_URL,
+  CLAUDE_SETTINGS_PATH, CLAUDE_LAUNCHER_PATH, PIRAMYD_ANTHROPIC_BASE_URL
+} = require("./constants");
 const { exists } = require("./utils");
 const { parseTomlSections } = require("./toml");
 
@@ -11,7 +15,7 @@ function getExistingApiKey(target) {
   try {
     if (target.kind === "claude") {
       const config = JSON.parse(fs.readFileSync(target.path, "utf8"));
-      return String(config.env?.ANTHROPIC_AUTH_TOKEN || "").trim();
+      return String(config.env?.ANTHROPIC_AUTH_TOKEN || config.env?.ANTHROPIC_API_KEY || "").trim();
     }
     if (target.kind === "codex") {
       if (!exists(CODEX_SECRET_PATH)) return "";
@@ -98,9 +102,18 @@ function codexLauncherLooksHealthy() {
 function targetNeedsRepair(target) {
   const key = getExistingApiKey(target);
   if (!key || !key.startsWith("sk-")) return true;
-  if (target.kind !== "codex") return false;
-  if (!codexHasExpectedConfig(target.path)) return true;
-  if (!codexLauncherLooksHealthy()) return true;
+  if (target.kind === "codex") {
+    if (!codexHasExpectedConfig(target.path)) return true;
+    if (!codexLauncherLooksHealthy()) return true;
+    return false;
+  }
+  if (target.kind === "claude") {
+    if (!exists(CLAUDE_LAUNCHER_PATH)) return true;
+    const raw = fs.readFileSync(CLAUDE_LAUNCHER_PATH, "utf8");
+    if (!raw.includes(PIRAMYD_ANTHROPIC_BASE_URL)) return true;
+    if (!raw.includes(path.dirname(CLAUDE_SETTINGS_PATH))) return true;
+    return false;
+  }
   return false;
 }
 
