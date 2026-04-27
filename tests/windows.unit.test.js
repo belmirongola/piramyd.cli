@@ -10,6 +10,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const { spawnSync } = require('child_process');
 const { IS_WINDOWS, CODEX_LAUNCHER_PATH, LOCAL_BIN_DIR } = require('../src/constants');
 const { isExecutable, resolveCommand, safeChmod } = require('../src/utils');
 const { generateConfig } = require('../src/patchers');
@@ -122,6 +123,28 @@ describe('codex launcher — platform content', () => {
     expect(launcher.content).toContain('set -eu');
     expect(launcher.content).toContain('-p piramyd');
     expect(launcher.content).toContain('OPENAI_API_KEY');
+
+    if (IS_WINDOWS) {
+      const shim = preview.files.find(f => f.path.includes('codex-piramyd-shim.cjs'));
+      expect(shim).toBeTruthy();
+      expect(shim.content).toContain('PIRAMYD_NODE_SHIM_V1');
+      expect(launcher.content).toContain('PIRAMYD_NODE_SHIM_V1');
+    }
+  });
+
+  test('copilot launcher and env are generated', () => {
+    const dir = mkTmpDir();
+    const target = { kind: 'copilot', path: path.join(dir, '.copilot', 'piramyd.env') };
+    const preview = generateConfig(target, TEST_API_KEY, TEST_CATALOG);
+
+    const envFile = preview.files.find(f => f.path.includes(path.join('.copilot', 'piramyd.env')));
+    const launcher = preview.files.find(f => f.path.includes('copilot-piramyd'));
+    expect(envFile).toBeTruthy();
+    expect(launcher).toBeTruthy();
+    expect(envFile.content).toContain('COPILOT_PROVIDER_BASE_URL=');
+    expect(envFile.content).toContain('COPILOT_PROVIDER_API_KEY=');
+    expect(envFile.content).toContain('COPILOT_MODEL=');
+    expect(launcher.content).toContain('copilot');
   });
 
   test('secret env file uses platform-appropriate format', () => {
@@ -132,7 +155,8 @@ describe('codex launcher — platform content', () => {
     expect(secret).toBeTruthy();
     expect(secret.content).toContain('OPENAI_API_KEY=');
     expect(secret.content).toContain(TEST_API_KEY);
-    expect(secret.content).toContain('https://api.piramyd.cloud/v1');
+    // base_url is now defined in config.toml, not in the secret env file
+    expect(secret.content).not.toContain('OPENAI_BASE_URL');
 
     if (IS_WINDOWS) {
       // Windows: no shell quoting, CRLF line endings
@@ -141,6 +165,40 @@ describe('codex launcher — platform content', () => {
     } else {
       // Unix: shell-quoted values
       expect(secret.content).toContain("'");
+    }
+  });
+});
+
+// ─── Node shim syntax — cross-platform regression guard ──────────
+
+describe('codex node shim — syntax validity', () => {
+  test('generated shim is syntactically valid on all Node.js versions', () => {
+    // Extract renderCodexNodeShimWindows from patchers source to test cross-platform
+    // regardless of IS_WINDOWS. This guards against Node.js v25+ strict quote parsing.
+    const src = fs.readFileSync(require.resolve('../src/patchers'), 'utf8');
+    const fnMatch = src.match(/function renderCodexNodeShimWindows\(binaryPath\)\s*\{([\s\S]*?)\n\}/);
+    expect(fnMatch).toBeTruthy();
+
+    // Build the function in an isolated scope to avoid IS_WINDOWS branching
+    const constants = require('../src/constants');
+    const fn = new Function(
+      'CODEX_SECRET_PATH', 'CODEX_PROFILE',
+      `function renderCodexNodeShimWindows(binaryPath) {${fnMatch[1]}} return renderCodexNodeShimWindows;`
+    )(constants.CODEX_SECRET_PATH, constants.CODEX_PROFILE);
+
+    const shim = fn('codex');
+    expect(typeof shim).toBe('string');
+    expect(shim).toContain('PIRAMYD_NODE_SHIM_V1');
+
+    // Write to a temp file and validate syntax with node --check
+    const shimPath = path.join(os.tmpdir(), 'piramyd-shim-syntax-test.cjs');
+    fs.writeFileSync(shimPath, shim, 'utf8');
+    try {
+      const result = spawnSync(process.execPath, ['--check', shimPath], { encoding: 'utf8', timeout: 5000 });
+      expect(result.status).toBe(0);
+      if (result.stderr) expect(result.stderr.trim()).toBe('');
+    } finally {
+      fs.unlinkSync(shimPath);
     }
   });
 });

@@ -3,8 +3,9 @@ const os = require("os");
 const path = require("path");
 const {
   CODEX_PROFILE, CODEX_MODEL_PROVIDER, GENERATED_START, GENERATED_END,
-  PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL, CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH,
-  CLAUDE_SETTINGS_PATH, CLAUDE_LAUNCHER_PATH, IS_WINDOWS
+  PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL, CODEX_SECRET_PATH, CODEX_NODE_SHIM_PATH, CODEX_LAUNCHER_PATH,
+  CLAUDE_SETTINGS_PATH, CLAUDE_ENV_PATH, CLAUDE_LAUNCHER_PATH,
+  COPILOT_ENV_PATH, COPILOT_LAUNCHER_PATH, IS_WINDOWS
 } = require("./constants");
 const {
   exists, escapeRegex, renderTomlString, renderTomlArray, renderShellString,
@@ -247,13 +248,11 @@ function renderCodexSecretFile(apiKey) {
     // Windows .env file — no shell quoting, just KEY=VALUE
     return [
       `OPENAI_API_KEY=${apiKey.trim()}`,
-      `OPENAI_BASE_URL=${PIRAMYD_OPENAI_BASE_URL}`,
       "",
     ].join("\r\n");
   }
   return [
     `OPENAI_API_KEY=${renderShellString(apiKey.trim())}`,
-    `OPENAI_BASE_URL=${renderShellString(PIRAMYD_OPENAI_BASE_URL)}`,
     "",
   ].join("\n");
 }
@@ -267,7 +266,6 @@ function renderCodexLauncherUnix(binaryPath) {
     '  # shellcheck disable=SC1090',
     '  . "$PIRAMYD_ENV"',
     "fi",
-    `export OPENAI_BASE_URL=${renderShellString(PIRAMYD_OPENAI_BASE_URL)}`,
     'if [ -z "${OPENAI_API_KEY:-}" ]; then',
     '  echo "Piramyd API key not configured for Codex. Re-run the wizard." >&2',
     "  exit 1",
@@ -297,45 +295,80 @@ function renderCodexLauncherUnix(binaryPath) {
     "",
   ].join("\n");
 }
-function renderCodexLauncherWindows(binaryPath) {
-  const codexBin = binaryPath || "codex";
-  // Escape CODEX_SECRET_PATH for batch: backslashes are native
+function renderCodexNodeShimWindows(binaryPath) {
+  const codexBin = JSON.stringify(binaryPath || "codex");
+  const secretPath = JSON.stringify(CODEX_SECRET_PATH);
+  const profile = JSON.stringify(CODEX_PROFILE);
+  return [
+    '"use strict";',
+    '// PIRAMYD_NODE_SHIM_V1',
+    'const fs = require("fs");',
+    'const { spawn } = require("child_process");',
+    `const CODEX_BIN = ${codexBin};`,
+    `const PIRAMYD_ENV = ${secretPath};`,
+    `const PROFILE = ${profile};`,
+    'function parseEnv(raw) {',
+    '  const out = {};',
+    '  const normalized = String(raw || "").replace(/^\uFEFF/, "");',
+    '  for (const line of normalized.split(/\\r?\\n/)) {',
+    '    if (!line) continue;',
+    '    const trimmed = line.trim();',
+    '    if (!trimmed || trimmed.startsWith("#")) continue;',
+    '    const idx = trimmed.indexOf("=");',
+    '    if (idx <= 0) continue;',
+    '    const key = trimmed.slice(0, idx).trim();',
+    '    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;',
+    '    let value = trimmed.slice(idx + 1).trim();',
+    '    if ((value.startsWith("\\"") && value.endsWith("\\"")) || (value.startsWith("\x27") && value.endsWith("\x27"))) {',
+    '      value = value.slice(1, -1);',
+    '    }',
+    '    out[key] = value;',
+    '  }',
+    '  return out;',
+    '}',
+    'let envPatch = {};',
+    'if (fs.existsSync(PIRAMYD_ENV)) {',
+    '  envPatch = parseEnv(fs.readFileSync(PIRAMYD_ENV, "utf8"));',
+    '}',
+    'const nextEnv = { ...process.env, ...envPatch };',
+    'if (!nextEnv.OPENAI_API_KEY) {',
+    '  console.error("Piramyd API key not configured for Codex. Re-run the wizard.");',
+    '  process.exit(1);',
+    '}',
+    'const inputArgs = process.argv.slice(2);',
+    'let explicitProfile = false;',
+    'for (let i = 0; i < inputArgs.length; i += 1) {',
+    '  const arg = inputArgs[i];',
+    '  if (arg === "-p" || arg === "--profile") { explicitProfile = true; break; }',
+    '}',
+    'const args = explicitProfile ? inputArgs : ["-p", PROFILE, ...inputArgs];',
+    'const child = spawn(CODEX_BIN, args, { stdio: "inherit", env: nextEnv, shell: true });',
+    'child.on("exit", (code, signal) => {',
+    '  if (signal) process.kill(process.pid, signal);',
+    '  process.exit(code == null ? 1 : code);',
+    '});',
+    'child.on("error", (err) => {',
+    '  console.error(err && err.message ? err.message : String(err));',
+    '  process.exit(1);',
+    '});',
+    '',
+  ].join("\n");
+}
+function renderCodexLauncherWindows() {
   return [
     "@echo off",
-    "setlocal enabledelayedexpansion",
-    "",
-    `set "PIRAMYD_ENV=${CODEX_SECRET_PATH}"`,
-    `set "CODEX_BIN=${codexBin}"`,
-    `set "OPENAI_BASE_URL=${PIRAMYD_OPENAI_BASE_URL}"`,
-    "",
-    "rem Load secrets from env file",
-    'if exist "%PIRAMYD_ENV%" (',
-    '  for /f "usebackq tokens=1,* delims==" %%A in ("%PIRAMYD_ENV%") do (',
-    '    set "%%A=%%B"',
-    "  )",
-    ")",
-    "",
-    'if "%OPENAI_API_KEY%"=="" (',
-    "  echo Piramyd API key not configured for Codex. Re-run the wizard. >&2",
-    "  exit /b 1",
-    ")",
-    "",
-    "rem Check if user passed an explicit -p / --profile flag",
-    "set EXPLICIT_PROFILE=0",
-    'set "PREV="',
-    'for %%A in (%*) do (',
-    '  if "!PREV!"=="profile" set EXPLICIT_PROFILE=1',
-    '  set "PREV="',
-    '  if "%%~A"=="-p" set "PREV=profile"',
-    '  if "%%~A"=="--profile" set "PREV=profile"',
-    ")",
-    "",
-    'if "%EXPLICIT_PROFILE%"=="0" (',
-    `  "%CODEX_BIN%" -p ${CODEX_PROFILE} %*`,
-    ") else (",
-    '  "%CODEX_BIN%" %*',
-    ")",
-    "",
+    "setlocal",
+    "rem PIRAMYD_NODE_SHIM_V1",
+    `rem base_url=${PIRAMYD_OPENAI_BASE_URL}`,
+    `rem profile=${CODEX_PROFILE}`,
+    `set \"PIRAMYD_SHIM=${CODEX_NODE_SHIM_PATH}\"`,
+    'if not exist "%PIRAMYD_SHIM%" (',
+    '  echo Piramyd Codex shim not found. Re-run the wizard. >&2',
+    '  exit /b 1',
+    ')',
+    'node "%PIRAMYD_SHIM%" %*',
+    'exit /b %ERRORLEVEL%',
+    '',
   ].join("\r\n");
 }
 function renderCodexLauncher(binaryPath) {
@@ -343,60 +376,172 @@ function renderCodexLauncher(binaryPath) {
     ? renderCodexLauncherWindows(binaryPath)
     : renderCodexLauncherUnix(binaryPath);
 }
-function updateClaudeConfig(filePath, apiKey, models, userTier = "free", selectedDefaultModelId = "") {
+function updateClaudeConfig(filePath, _apiKey, models, userTier = "free", selectedDefaultModelId = "") {
   const config = loadJsonConfig(filePath, "Claude Code");
-  const env = typeof config.env === "object" && config.env ? config.env : {};
-  const selected = pickClaudeModelSet(models);
 
-  env.ANTHROPIC_BASE_URL = PIRAMYD_ANTHROPIC_BASE_URL;
-  env.ANTHROPIC_AUTH_TOKEN = apiKey.trim();
-  if (selected.opus) env.ANTHROPIC_DEFAULT_OPUS_MODEL = selected.opus;
-  if (selected.sonnet) env.ANTHROPIC_DEFAULT_SONNET_MODEL = selected.sonnet;
-  if (selected.haiku) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = selected.haiku;
+  // Clean up stale auth vars written by older toolkit versions.
+  // Auth is now handled exclusively by the launcher (process env + .env file).
+  if (config.env && typeof config.env === "object") {
+    delete config.env.ANTHROPIC_AUTH_TOKEN;
+    delete config.env.ANTHROPIC_BASE_URL;
+    delete config.env.ANTHROPIC_DEFAULT_OPUS_MODEL;
+    delete config.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+    delete config.env.ANTHROPIC_DEFAULT_HAIKU_MODEL;
+    if (Object.keys(config.env).length === 0) delete config.env;
+  }
 
-  config.env = env;
   const defaultModelId = targetDefaultModel({kind: "claude"}, models, userTier, selectedDefaultModelId);
   if (defaultModelId !== "manual selection") config.model = defaultModelId;
 
   return JSON.stringify(config, null, 2) + os.EOL;
 }
 
-function renderClaudeLauncherUnix(binaryPath, apiKey) {
+function renderClaudeEnvFile(apiKey) {
+  if (IS_WINDOWS) {
+    return [
+      `ANTHROPIC_API_KEY=${apiKey.trim()}`,
+      "",
+    ].join("\r\n");
+  }
   return [
-    "#!/bin/sh",
-    "set -eu",
-    `CLAUDE_BIN=${renderShellString(binaryPath || "claude")}`,
-    `CLAUDE_CONFIG_DIR=${renderShellString(path.dirname(CLAUDE_SETTINGS_PATH))}`,
-    `ANTHROPIC_BASE_URL=${renderShellString(PIRAMYD_ANTHROPIC_BASE_URL)}`,
     `ANTHROPIC_API_KEY=${renderShellString(apiKey.trim())}`,
-    "",
-    "export CLAUDE_CONFIG_DIR",
-    "export ANTHROPIC_BASE_URL",
-    "export ANTHROPIC_API_KEY",
-    "",
-    'exec "$CLAUDE_BIN" --bare "$@"',
     "",
   ].join("\n");
 }
 
-function renderClaudeLauncherWindows(binaryPath, apiKey) {
+function renderClaudeLauncherUnix(binaryPath) {
+  return [
+    "#!/bin/sh",
+    "set -eu",
+    `PIRAMYD_ENV=${renderShellString(CLAUDE_ENV_PATH)}`,
+    `CLAUDE_BIN=${renderShellString(binaryPath || "claude")}`,
+    'if [ -f "$PIRAMYD_ENV" ]; then',
+    '  # shellcheck disable=SC1090',
+    '  . "$PIRAMYD_ENV"',
+    "fi",
+    `export CLAUDE_CONFIG_DIR=${renderShellString(path.dirname(CLAUDE_SETTINGS_PATH))}`,
+    `export ANTHROPIC_BASE_URL=${renderShellString(PIRAMYD_ANTHROPIC_BASE_URL)}`,
+    'if [ -z "${ANTHROPIC_API_KEY:-}" ]; then',
+    '  echo "Piramyd API key not configured for Claude. Re-run the wizard." >&2',
+    "  exit 1",
+    "fi",
+    "export ANTHROPIC_API_KEY",
+    'exec "$CLAUDE_BIN" "$@"',
+    "",
+  ].join("\n");
+}
+
+function renderClaudeLauncherWindows(binaryPath) {
   const claudeBin = binaryPath || "claude";
   return [
     "@echo off",
-    "setlocal",
+    "setlocal enabledelayedexpansion",
+    "",
+    `set "PIRAMYD_ENV=${CLAUDE_ENV_PATH}"`,
     `set "CLAUDE_BIN=${claudeBin}"`,
+    "",
+    "rem Load API key from env file",
+    'if exist "%PIRAMYD_ENV%" (',
+    '  for /f "usebackq tokens=1,* delims==" %%A in ("%PIRAMYD_ENV%") do (',
+    '    set "%%A=%%B"',
+    "  )",
+    ")",
+    "",
+    'if "%ANTHROPIC_API_KEY%"=="" (',
+    "  echo Piramyd API key not configured for Claude. Re-run the wizard. >&2",
+    "  exit /b 1",
+    ")",
+    "",
     `set "CLAUDE_CONFIG_DIR=${path.dirname(CLAUDE_SETTINGS_PATH)}"`,
     `set "ANTHROPIC_BASE_URL=${PIRAMYD_ANTHROPIC_BASE_URL}"`,
-    `set "ANTHROPIC_API_KEY=${apiKey.trim()}"`,
-    '"%CLAUDE_BIN%" --bare %*',
+    '"%CLAUDE_BIN%" %*',
     "",
   ].join("\r\n");
 }
 
-function renderClaudeLauncher(binaryPath, apiKey) {
+function renderClaudeLauncher(binaryPath) {
   return IS_WINDOWS
-    ? renderClaudeLauncherWindows(binaryPath, apiKey)
-    : renderClaudeLauncherUnix(binaryPath, apiKey);
+    ? renderClaudeLauncherWindows(binaryPath)
+    : renderClaudeLauncherUnix(binaryPath);
+}
+
+function renderCopilotEnvFile(apiKey, modelId) {
+  if (IS_WINDOWS) {
+    return [
+      `COPILOT_PROVIDER_BASE_URL=${PIRAMYD_OPENAI_BASE_URL}`,
+      "COPILOT_PROVIDER_TYPE=openai",
+      `COPILOT_PROVIDER_API_KEY=${apiKey.trim()}`,
+      `COPILOT_MODEL=${modelId}`,
+      "",
+    ].join("\r\n");
+  }
+  return [
+    `COPILOT_PROVIDER_BASE_URL=${renderShellString(PIRAMYD_OPENAI_BASE_URL)}`,
+    "COPILOT_PROVIDER_TYPE=openai",
+    `COPILOT_PROVIDER_API_KEY=${renderShellString(apiKey.trim())}`,
+    `COPILOT_MODEL=${renderShellString(modelId)}`,
+    "",
+  ].join("\n");
+}
+
+function renderCopilotLauncherUnix(binaryPath) {
+  return [
+    "#!/bin/sh",
+    "set -eu",
+    `PIRAMYD_ENV=${renderShellString(COPILOT_ENV_PATH)}`,
+    `COPILOT_BIN=${renderShellString(binaryPath || "copilot")}`,
+    'if [ -f "$PIRAMYD_ENV" ]; then',
+    '  # shellcheck disable=SC1090',
+    '  . "$PIRAMYD_ENV"',
+    "fi",
+    'if [ -z "${COPILOT_PROVIDER_API_KEY:-}" ]; then',
+    '  echo "Piramyd API key not configured for Copilot. Re-run the wizard." >&2',
+    "  exit 1",
+    "fi",
+    'if [ -z "${COPILOT_MODEL:-}" ]; then',
+    '  echo "Piramyd model not configured for Copilot. Re-run the wizard." >&2',
+    "  exit 1",
+    "fi",
+    "export COPILOT_PROVIDER_BASE_URL COPILOT_PROVIDER_TYPE COPILOT_PROVIDER_API_KEY COPILOT_MODEL",
+    'exec "$COPILOT_BIN" "$@"',
+    "",
+  ].join("\n");
+}
+
+function renderCopilotLauncherWindows(binaryPath) {
+  const copilotBin = binaryPath || "copilot";
+  return [
+    "@echo off",
+    "setlocal enabledelayedexpansion",
+    "",
+    `set "PIRAMYD_ENV=${COPILOT_ENV_PATH}"`,
+    `set "COPILOT_BIN=${copilotBin}"`,
+    "",
+    "rem Load provider env file",
+    'if exist "%PIRAMYD_ENV%" (',
+    '  for /f "usebackq tokens=1,* delims==" %%A in ("%PIRAMYD_ENV%") do (',
+    '    set "%%A=%%B"',
+    "  )",
+    ")",
+    "",
+    'if "%COPILOT_PROVIDER_API_KEY%"=="" (',
+    "  echo Piramyd API key not configured for Copilot. Re-run the wizard. >&2",
+    "  exit /b 1",
+    ")",
+    'if "%COPILOT_MODEL%"=="" (',
+    "  echo Piramyd model not configured for Copilot. Re-run the wizard. >&2",
+    "  exit /b 1",
+    ")",
+    "",
+    '"%COPILOT_BIN%" %*',
+    "",
+  ].join("\r\n");
+}
+
+function renderCopilotLauncher(binaryPath) {
+  return IS_WINDOWS
+    ? renderCopilotLauncherWindows(binaryPath)
+    : renderCopilotLauncherUnix(binaryPath);
 }
 
 function updateGeminiConfig(filePath, apiKey) {
@@ -449,6 +594,7 @@ function generateConfig(target, apiKey, catalog) {
   if (target.kind === "gemini") next = updateGeminiConfig(target.path, apiKey);
   if (target.kind === "qwen") next = updateQwenConfig(target.path, apiKey, models, tier, selectedDefaultModelId);
   if (target.kind === "opencode") next = updateOpenCodeConfig(target.path, apiKey, models, tier, selectedDefaultModelId);
+  if (target.kind === "copilot") next = "";
 
   if (typeof next !== "string") throw new Error(`Unsupported target kind: ${target.kind}`);
 
@@ -457,11 +603,22 @@ function generateConfig(target, apiKey, catalog) {
     const secretContent = renderCodexSecretFile(apiKey);
     const launcherContent = renderCodexLauncher(target.binaryPath);
     result.files.push({ path: CODEX_SECRET_PATH, content: secretContent, mode: 0o600 });
+    if (IS_WINDOWS) result.files.push({ path: CODEX_NODE_SHIM_PATH, content: renderCodexNodeShimWindows(target.binaryPath), mode: 0o600 });
     result.files.push({ path: CODEX_LAUNCHER_PATH, content: launcherContent, mode: 0o755 });
   }
   if (target.kind === "claude") {
-    const launcherContent = renderClaudeLauncher(target.binaryPath, apiKey);
+    const envContent = renderClaudeEnvFile(apiKey);
+    const launcherContent = renderClaudeLauncher(target.binaryPath);
+    result.files.push({ path: CLAUDE_ENV_PATH, content: envContent, mode: 0o600 });
     result.files.push({ path: CLAUDE_LAUNCHER_PATH, content: launcherContent, mode: 0o755 });
+  }
+  if (target.kind === "copilot") {
+    const modelId = targetDefaultModel({ kind: "copilot" }, models, tier, selectedDefaultModelId).replace(/^piramyd\//, "");
+    const envContent = renderCopilotEnvFile(apiKey, modelId);
+    const launcherContent = renderCopilotLauncher(target.binaryPath);
+    result.files = [{ path: COPILOT_ENV_PATH, content: envContent, mode: 0o600 }];
+    result.config = envContent;
+    result.files.push({ path: COPILOT_LAUNCHER_PATH, content: launcherContent, mode: 0o755 });
   }
   return result;
 }
@@ -475,15 +632,21 @@ function writeConfig(target, apiKey, catalog, options = {}) {
   }
 
   const backups = [];
-  backupIfPresent(target.path, backups);
-  writeFileWithMode(target.path, generated.config);
+  if (target.kind !== "copilot") {
+    backupIfPresent(target.path, backups);
+    writeFileWithMode(target.path, generated.config);
+  }
 
   const artifacts = [];
-  if (target.kind === "codex" || target.kind === "claude") {
-    const extraFiles = generated.files.slice(1);
+  if (target.kind === "codex" || target.kind === "claude" || target.kind === "copilot") {
+    const extraFiles = target.kind === "copilot" ? generated.files : generated.files.slice(1);
     if (target.kind === "codex") backupIfPresent(CODEX_SECRET_PATH, backups);
+    if (target.kind === "codex" && IS_WINDOWS) backupIfPresent(CODEX_NODE_SHIM_PATH, backups);
     if (target.kind === "codex") backupIfPresent(CODEX_LAUNCHER_PATH, backups);
+    if (target.kind === "claude") backupIfPresent(CLAUDE_ENV_PATH, backups);
     if (target.kind === "claude") backupIfPresent(CLAUDE_LAUNCHER_PATH, backups);
+    if (target.kind === "copilot") backupIfPresent(COPILOT_ENV_PATH, backups);
+    if (target.kind === "copilot") backupIfPresent(COPILOT_LAUNCHER_PATH, backups);
     for (const file of extraFiles) {
       writeFileWithMode(file.path, file.content, file.mode);
       artifacts.push(file.path);
