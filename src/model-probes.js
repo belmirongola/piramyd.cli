@@ -14,7 +14,7 @@ function buildProbePayload(modelId) {
   return JSON.stringify({
     model: modelId,
     input: PROBE_PROMPT,
-    max_output_tokens: 8,
+    max_output_tokens: 30,
   });
 }
 
