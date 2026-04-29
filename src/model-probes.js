@@ -1,7 +1,7 @@
 const https = require("https");
 const { PIRAMYD_OPENAI_BASE_URL } = require("./constants");
 
-const DEFAULT_PROBE_TIMEOUT_MS = 35_000;
+const DEFAULT_PROBE_TIMEOUT_MS = 60_000;
 
 const PROBE_PROMPT = [
   "Return exactly this token and nothing else: OK",
