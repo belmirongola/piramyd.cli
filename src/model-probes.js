@@ -14,7 +14,7 @@ function buildProbePayload(modelId) {
   return JSON.stringify({
     model: modelId,
     input: PROBE_PROMPT,
-    max_output_tokens: 30,
+    max_output_tokens: 150,
   });
 }
 
@@ -26,6 +26,17 @@ function extractProbeText(payload) {
     for (const content of item.content) {
       if (content?.type === "output_text" && content.text) return String(content.text).trim();
     }
+  }
+
+  // Responses API: reasoning model exhausted token budget — status=incomplete, output=[]
+  // The model is reachable and processed the request; treat as alive.
+  if (
+    payload?.object === "response" &&
+    String(payload?.status || "").toLowerCase() === "incomplete" &&
+    String(payload?.incomplete_details?.reason || "") === "max_output_tokens" &&
+    output.length === 0
+  ) {
+    return "__reasoning_only__";
   }
 
   if (typeof payload?.output_text === "string") return payload.output_text.trim();
@@ -40,8 +51,11 @@ function extractProbeText(payload) {
   // OpenAI Chat Completions API: choices[].message.content
   const choices = Array.isArray(payload?.choices) ? payload.choices : [];
   for (const choice of choices) {
-    const content = choice?.message?.content;
+    const msg = choice?.message;
+    const content = msg?.content;
     if (typeof content === "string" && content.trim()) return content.trim();
+    // Reasoning model via chat completions — content empty, reasoning_content populated
+    if (msg?.reasoning_content || msg?.thinking_content) return "__reasoning_only__";
   }
 
   return "";
@@ -50,6 +64,8 @@ function extractProbeText(payload) {
 function normalizeProbeMessage(message) {
   const raw = String(message || "").trim();
   if (!raw) return { reason: "empty_response", detail: "empty response" };
+  // Reasoning models exhaust token budget thinking — the model is reachable and working
+  if (raw === "__reasoning_only__") return { reason: "ok", detail: "OK" };
 
   let parsed = null;
   try {
