@@ -17,7 +17,7 @@ const { probeModelsConcurrent } = require("../src/model-probes");
 const { version: VERSION } = require("../package.json");
 
 // ── Brand system ────────────────────────────────────────────────
-const brand   = (s) => pc.cyan(s);
+const brand   = (s) => pc.yellow(s);
 const accent  = (s) => pc.yellow(s);
 const ok      = (s) => pc.green(s);
 const muted   = (s) => pc.dim(s);
@@ -660,7 +660,7 @@ function renderModelProbeHeader() {
 async function runModels() {
   console.clear();
   console.log(renderModelsBanner());
-  p.intro(pc.bgGreen(pc.black(" Piramyd Models ")));
+  p.intro(pc.bgYellow(pc.black(" Piramyd Models ")));
 
   const targets = listAvailableTargets();
   const existingApiKey = targets.length ? findReusableApiKey(targets, targets[0]) : "";
@@ -744,7 +744,7 @@ async function main() {
 
   console.clear();
   console.log(renderBanner());
-  p.intro(pc.bgCyan(pc.black(" CLI Onboarding ")));
+  p.intro(pc.bgYellow(pc.black(" CLI Onboarding ")));
 
   const targets = listAvailableTargets();
   if (!targets.length) {
