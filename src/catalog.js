@@ -30,7 +30,7 @@ function fetchJson(url, apiKey, timeoutMs = 30_000, options = {}) {
         ...(family ? { family } : {}),
         headers: {
           Authorization: `Bearer ${apiKey}`,
-          "User-Agent": "piramyd-cli/4.0",
+          "User-Agent": "piramyd-toolkit/0.1.26",
         },
       },
       (res) => {
@@ -131,6 +131,31 @@ async function fetchModels(apiKey) {
     }
   }
 }
+
+const VISION_CAPS = new Set(["vision", "image_in", "image-input", "multimodal", "image-analysis"]);
+const VISION_ICON = "◉";
+
+function detectVision(input, capabilities) {
+  if (input.includes("image")) return true;
+  return capabilities.some((cap) => VISION_CAPS.has(cap));
+}
+
+function modelHasVision(model) {
+  if (!model || typeof model !== "object") return false;
+  if (model.hasVision === true) return true;
+  const input = Array.isArray(model.input)
+    ? model.input.map((item) => String(item).toLowerCase())
+    : [];
+  const capabilities = Array.isArray(model.capabilities)
+    ? model.capabilities.map((item) => String(item).toLowerCase())
+    : [];
+  return detectVision(input, capabilities);
+}
+
+function visionIcon(model) {
+  return modelHasVision(model) ? VISION_ICON : "";
+}
+
 function normalizeCatalogEntry(entry) {
   if (!entry || typeof entry !== "object") return null;
 
@@ -159,7 +184,7 @@ function normalizeCatalogEntry(entry) {
   const hasText = input.includes("text") || input.length === 0 || capabilities.includes("chat") || capabilities.includes("text-generation");
   if (!hasText && type !== "model") return null;
 
-  const hasVision = input.includes("image") || capabilities.includes("vision") || capabilities.includes("image-analysis");
+  const hasVision = detectVision(input, capabilities);
   const hasVideo = input.includes("video") || capabilities.some((cap) => cap.includes("video"));
   const reasoning =
     Boolean(entry.reasoning) ||
@@ -171,6 +196,7 @@ function normalizeCatalogEntry(entry) {
     id,
     name: String(entry.name || id),
     reasoning,
+    hasVision,
     input: hasVideo ? ["text", "image", "video"] : hasVision ? ["text", "image"] : ["text"],
     contextWindow: coercePositiveNumber(entry.contextWindow ?? entry.context_window ?? entry.context_length, 256000),
     maxTokens: coercePositiveNumber(entry.maxTokens ?? entry.max_output_tokens, 32768),
@@ -202,4 +228,43 @@ async function loadCatalog(apiKey) {
   };
 }
 
-module.exports = { fetchModels, normalizeCatalogEntry, sanitizeCatalog, loadCatalog };
+function uniqueModels(models) {
+  const seen = new Set();
+  const list = [];
+  for (const entry of models || []) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = String(entry.id || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    list.push({ ...entry, id, name: String(entry.name || id) });
+  }
+  return list;
+}
+
+function applyCatalogSelection(catalog, selectedDefaultModelId, extraModels = []) {
+  const merged = uniqueModels([...(catalog.models || []), ...extraModels]);
+  return {
+    ...catalog,
+    models: merged,
+    defaultModelId: String(selectedDefaultModelId || "").trim(),
+  };
+}
+
+function findModelById(models, modelId) {
+  const wanted = String(modelId || "").trim().toLowerCase();
+  if (!wanted) return null;
+  return (models || []).find((model) => String(model.id || "").trim().toLowerCase() === wanted) || null;
+}
+
+module.exports = {
+  fetchModels,
+  normalizeCatalogEntry,
+  sanitizeCatalog,
+  loadCatalog,
+  uniqueModels,
+  applyCatalogSelection,
+  findModelById,
+  modelHasVision,
+  visionIcon,
+  VISION_ICON,
+};

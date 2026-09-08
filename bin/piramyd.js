@@ -8,11 +8,19 @@ const {
   CLAUDE_LAUNCHER_PATH,
 } = require("../src/constants");
 const { normalizeConfigPath, detectConfigKind, exists, listAvailableTargets, truncateMiddle, maskApiKey, padRight } = require("../src/utils");
-const { loadCatalog } = require("../src/catalog");
+const { loadCatalog, uniqueModels, applyCatalogSelection, findModelById, modelHasVision, VISION_ICON } = require("../src/catalog");
 const { targetBaseUrl, targetDefaultModel, writeConfig, generateConfig } = require("../src/patchers");
 const { getExistingApiKey, findReusableApiKey, targetNeedsRepair, codexShimHealth, syncClaudeState } = require("../src/diagnosis");
-const { FALLBACK_DEFAULT_MODEL, buildEmergencyCatalog, uniqueModels, applyCatalogSelection, findModelById } = require("../src/emergency-catalog");
 const { probeModelsConcurrent } = require("../src/model-probes");
+const { parseCliArgs } = require("../src/cli-args");
+const { inspectAllTargets, restoreTarget, resolveSelectedTargets } = require("../src/ops");
+const {
+  DEFAULT_API_URL,
+  fetchLatestProbeRun,
+  summarizeSession,
+  relativeAge,
+} = require("../src/prober");
+const { KNOWN_TARGETS } = require("../src/constants");
 
 const { version: VERSION } = require("../package.json");
 
@@ -26,7 +34,14 @@ const em      = (s) => pc.bold(s);
 const DIVIDER      = muted("\u2550".repeat(60));
 const DIVIDER_THIN = muted("\u2500".repeat(40));
 const MODEL_STATUS_WIDTH = 8;
-const MODEL_NAME_WIDTH = 34;
+const MODEL_NAME_WIDTH = 32;
+const MODEL_VISION_WIDTH = 2;
+const PROBE_STATUS_WIDTH = 9;
+const PROBE_NAME_WIDTH = 34;
+const PROBE_FLAG_WIDTH = 5;
+const PROBE_COUNT_WIDTH = 9;
+const PROBE_CONF_WIDTH = 6;
+const PROBE_TIME_WIDTH = 8;
 const MODEL_LATENCY_WIDTH = 8;
 const MODEL_RESPONSE_WIDTH = 26;
 const PROBE_PROGRESS_FRAMES = [".", "..", "..."];
@@ -104,21 +119,10 @@ function targetLauncherPath(kind) {
 
 // ── Model selection ─────────────────────────────────────────────
 async function askModelDefaultSelection(catalog) {
-  if (catalog.sourceType === "local-fallback") {
-    p.log.warn(`Using emergency fallback model: ${FALLBACK_DEFAULT_MODEL}`);
-    return { defaultModelId: FALLBACK_DEFAULT_MODEL, addedModels: [] };
-  }
-
   const models = uniqueModels(catalog.models || []);
   if (!models.length) {
-    return { defaultModelId: FALLBACK_DEFAULT_MODEL, addedModels: [{
-      id: FALLBACK_DEFAULT_MODEL,
-      name: "Claude Sonnet 4.5",
-      reasoning: true,
-      input: ["text"],
-      contextWindow: 200000,
-      maxTokens: 8192,
-    }] };
+    p.cancel("Piramyd catalog is empty. Check your API key and try again.");
+    process.exit(1);
   }
 
   const tier = String(catalog.tier || "unknown").toUpperCase();
@@ -136,14 +140,15 @@ async function askModelDefaultSelection(catalog) {
   for (const model of topFromApi) {
     const isDefault = model.id === defaultByTier.id;
     const badge = model.reasoning ? muted(" reasoning") : "";
+    const vision = modelHasVision(model) ? ` ${muted(VISION_ICON)}` : "";
     const prefix = isDefault ? ok("\u2192") : muted("\u00B7");
     const name = isDefault ? em(brand(model.id)) : model.id;
-    p.log.message(`  ${prefix} ${name}${badge}`);
+    p.log.message(`  ${prefix} ${name}${vision}${badge}`);
   }
 
   const options = models.map((model) => ({
-    label: model.id,
-    hint: model.name,
+    label: modelHasVision(model) ? `${model.id} ${VISION_ICON}` : model.id,
+    hint: modelHasVision(model) ? `${model.name} · vision` : model.name,
     value: model.id,
   }));
   options.push({
@@ -572,11 +577,11 @@ async function runDoctor() {
   let catalog;
   try {
     catalog = await loadCatalog(foundApiKey);
-    if (!catalog.models.length) throw new Error("empty catalog");
     spinner.stop(`Catalog refreshed: ${em(String(catalog.models.length))} models found.`);
   } catch (err) {
-    catalog = buildEmergencyCatalog();
-    spinner.stop(`Catalog refresh failed ${muted(`(${err.message})`)}. Using fallback.`);
+    spinner.stop(pc.red("Catalog refresh failed."));
+    p.cancel(err.message || String(err));
+    process.exit(1);
   }
 
   const results = [];
@@ -630,10 +635,12 @@ async function promptModelsApiKey(existingApiKey) {
 function showModelProbeResults(catalog, results) {
   const upCount = results.filter((result) => result.ok).length;
   const downCount = results.length - upCount;
+  const visionCount = catalog.models.filter((model) => modelHasVision(model)).length;
 
   console.log(DIVIDER);
   console.log(`  ${em("Tier:")} ${brand(String(catalog.tier || "unknown").toUpperCase())}`);
   console.log(`  ${em("Models checked:")} ${results.length}  ${ok(String(upCount))} up  ${pc.red(String(downCount))} down`);
+  console.log(`  ${em("Vision models:")} ${brand(VISION_ICON)} ${String(visionCount)}`);
   console.log(DIVIDER);
   console.log("");
 }
@@ -643,6 +650,7 @@ function formatModelProbeRow(catalog, result) {
   const status = result.ok ? ok("● UP") : pc.red("● DOWN");
   const latency = result.latencyMs ? `${result.latencyMs}ms` : "-";
   const name = model ? model.id : result.modelId;
+  const vision = padRight(modelHasVision(model) ? brand(VISION_ICON) : "", MODEL_VISION_WIDTH);
   const paddedStatus = padRight(status, MODEL_STATUS_WIDTH);
   const paddedName = padRight(truncateMiddle(name, MODEL_NAME_WIDTH), MODEL_NAME_WIDTH);
   const paddedLatency = padRight(truncateMiddle(latency, MODEL_LATENCY_WIDTH), MODEL_LATENCY_WIDTH);
@@ -650,11 +658,11 @@ function formatModelProbeRow(catalog, result) {
   const paddedDetails = result.ok
     ? padRight(muted(detailText), MODEL_RESPONSE_WIDTH)
     : padRight(pc.red(detailText), MODEL_RESPONSE_WIDTH);
-  return `  ${paddedStatus} ${paddedName} ${paddedLatency} ${paddedDetails}`;
+  return `  ${paddedStatus} ${paddedName} ${vision} ${paddedLatency} ${paddedDetails}`;
 }
 
 function renderModelProbeHeader() {
-  return `  ${padRight(muted("Status"), MODEL_STATUS_WIDTH)} ${padRight(muted("Model"), MODEL_NAME_WIDTH)} ${padRight(muted("Latency"), MODEL_LATENCY_WIDTH)} ${padRight(muted("Response"), MODEL_RESPONSE_WIDTH)}`;
+  return `  ${padRight(muted("Status"), MODEL_STATUS_WIDTH)} ${padRight(muted("Model"), MODEL_NAME_WIDTH)} ${padRight(muted(VISION_ICON), MODEL_VISION_WIDTH)} ${padRight(muted("Latency"), MODEL_LATENCY_WIDTH)} ${padRight(muted("Response"), MODEL_RESPONSE_WIDTH)}`;
 }
 
 async function runModels() {
@@ -687,6 +695,7 @@ async function runModels() {
   updateModelProbeProgress(0, catalog.models.length, progressFrame);
   console.log("");
   console.log(renderModelProbeHeader());
+  console.log(`  ${brand(VISION_ICON)} ${muted("= computer vision / multimodal")}`);
   console.log("");
 
   let completed = 0;
@@ -707,39 +716,295 @@ async function runModels() {
   p.outro(ok("Model check completed."));
 }
 
+// ── prober (last probe round from the database) ─────────────────
+async function promptProberApiKey() {
+  const value = await p.password({
+    message: "Paste your Piramyd admin API key (sk-...)",
+    mask: "*",
+    validate(input) {
+      const candidate = String(input || "").trim();
+      if (!candidate) return "API key is required.";
+      if (!candidate.startsWith("sk-")) return "Provide a valid Piramyd API key (sk-...).";
+      return undefined;
+    },
+  });
+  if (p.isCancel(value)) {
+    p.cancel("Operation cancelled.");
+    process.exit(0);
+  }
+  return String(value || "").trim();
+}
+
+function proberFlagCell(value) {
+  if (value === true) return ok("✓");
+  if (value === false) return pc.red("✗");
+  return muted("?");
+}
+
+function renderProberHeader() {
+  return `  ${padRight(muted("Status"), PROBE_STATUS_WIDTH)} ${padRight(muted("Model"), PROBE_NAME_WIDTH)} ${padRight(muted(VISION_ICON), PROBE_FLAG_WIDTH)} ${padRight(muted("Tool"), PROBE_FLAG_WIDTH)} ${padRight(muted("Strm"), PROBE_FLAG_WIDTH)} ${padRight(muted("Probes"), PROBE_COUNT_WIDTH)} ${padRight(muted("Conf"), PROBE_CONF_WIDTH)} ${padRight(muted("Time"), PROBE_TIME_WIDTH)} ${padRight(muted("Age"), PROBE_TIME_WIDTH)}`;
+}
+
+function formatProberRow(row) {
+  const statusText =
+    row.status === "completed" && !row.error
+      ? ok("● OK")
+      : row.status === "failed" || row.status === "error"
+        ? pc.red(`● ${String(row.status).toUpperCase()}`)
+        : muted(`● ${String(row.status || "?").toUpperCase()}`);
+
+  const name = truncateMiddle(`${row.provider}/${row.model}`, PROBE_NAME_WIDTH);
+  const vision =
+    row.supportsVision === true
+      ? brand(VISION_ICON)
+      : row.supportsVision === false
+        ? pc.red("✗")
+        : muted("?");
+  const count = row.probesTotal > 0 ? `${row.probesOk}/${row.probesTotal}` : muted("-");
+  const conf = typeof row.confidence === "number" ? `${Math.round(row.confidence * 100)}%` : muted("-");
+  const time = typeof row.elapsedMs === "number" ? `${(row.elapsedMs / 1000).toFixed(1)}s` : muted("-");
+  const age = relativeAge(row.probedAt) || muted("-");
+
+  return `  ${padRight(statusText, PROBE_STATUS_WIDTH)} ${padRight(name, PROBE_NAME_WIDTH)} ${padRight(vision, PROBE_FLAG_WIDTH)} ${padRight(proberFlagCell(row.supportsTools), PROBE_FLAG_WIDTH)} ${padRight(proberFlagCell(row.supportsStreaming), PROBE_FLAG_WIDTH)} ${padRight(count, PROBE_COUNT_WIDTH)} ${padRight(conf, PROBE_CONF_WIDTH)} ${padRight(time, PROBE_TIME_WIDTH)} ${padRight(age, PROBE_TIME_WIDTH)}`;
+}
+
+function showProberSummary(rows) {
+  const completed = rows.filter((row) => row.status === "completed" && !row.error).length;
+  const failed = rows.length - completed;
+  const vision = rows.filter((row) => row.supportsVision === true).length;
+  const ages = rows.map((row) => relativeAge(row.probedAt)).filter(Boolean);
+  console.log(DIVIDER);
+  console.log(`  ${em("Models in last round:")} ${rows.length}  ${ok(String(completed))} ok  ${pc.red(String(failed))} failed`);
+  console.log(`  ${em("Vision models:")} ${brand(VISION_ICON)} ${String(vision)}`);
+  if (ages.length) {
+    console.log(`  ${em("Probed:")} ${muted(`${ages[ages.length - 1]} – ${ages[0]} ago`)}`);
+  }
+  const errs = rows.filter((row) => row.error);
+  if (errs.length) {
+    console.log("");
+    for (const row of errs) {
+      console.log(`  ${pc.red("!")} ${row.provider}/${row.model} ${muted("—")} ${truncateMiddle(String(row.error), 60)}`);
+    }
+  }
+  console.log(DIVIDER);
+  console.log("");
+}
+
+async function runProber(cli) {
+  const jsonOut = cli.json;
+
+  if (!jsonOut) {
+    console.clear();
+    console.log(renderModelsBanner());
+    p.intro(pc.bgYellow(pc.black(" Piramyd Prober ")));
+  }
+
+  const apiKey = cli.apiKey || (jsonOut ? "" : await promptProberApiKey());
+  if (!apiKey || !apiKey.startsWith("sk-")) {
+    throw new Error("prober requires an admin API key: --api-key sk-... or PIRAMYD_API_KEY");
+  }
+
+  const apiUrl = (cli.apiBase || DEFAULT_API_URL).replace(/\/+$/, "");
+
+  const spinner = jsonOut ? null : p.spinner();
+  if (spinner) spinner.start("Loading the last probe round from piramyd.api...");
+
+  let items;
+  try {
+    items = await fetchLatestProbeRun(apiUrl, apiKey, { model: cli.model });
+  } catch (err) {
+    if (spinner) spinner.stop(pc.red("Could not load probe sessions."));
+    if (err.statusCode === 403) {
+      throw new Error("This API key does not belong to an admin user.");
+    }
+    throw new Error(`prober/latest failed: ${err.message || err}`);
+  }
+
+  const rows = items.map(summarizeSession);
+
+  if (spinner) {
+    spinner.stop(`${em(String(rows.length))} model${rows.length === 1 ? "" : "s"} in the last probe round`);
+  }
+
+  if (jsonOut) {
+    console.log(JSON.stringify({ ok: true, api: apiUrl, total: rows.length, items: rows }, null, 2));
+    return;
+  }
+
+  if (!rows.length) {
+    p.outro(cli.model ? `No stored probe session for "${cli.model}".` : "No probe sessions stored yet.");
+    return;
+  }
+
+  console.log(DIVIDER);
+  console.log(`  ${em("Source:")}   ${apiUrl}/v1/admin/prober/latest`);
+  console.log(`  ${em("Models:")}   ${rows.length}${cli.model ? muted(`  (filter: ${cli.model})`) : ""}`);
+  console.log(DIVIDER);
+  console.log("");
+  console.log(renderProberHeader());
+  console.log(`  ${brand(VISION_ICON)} ${muted("= computer vision / multimodal")}`);
+  console.log("");
+  for (const row of rows) {
+    console.log(formatProberRow(row));
+  }
+  console.log("");
+  showProberSummary(rows);
+  p.outro(ok("Last probe round shown."));
+}
+
+function printHelp() {
+  console.log([
+    "",
+    brand(BANNER),
+    "",
+    `  ${muted("Universal AI Gateway")}  ${muted("\u2502")}  ${em(`v${VERSION}`)}`,
+    "",
+    `  ${em("Usage:")}   piramyd [command] [options]`,
+    "",
+    `  ${em("Commands:")}`,
+    `    ${muted("(default)")}     Interactive onboarding wizard`,
+    `    ${muted("doctor")}        Auto-detect and repair broken configurations`,
+    `    ${muted("models")}        Realtime health check for all models in your tier`,
+    `    ${muted("prober")}        Print the last probe round from the database (admin API key)`,
+    `    ${muted("status")}        Show installed CLI state and drift`,
+    `    ${muted("restore")}       Restore the latest backup for a target`,
+    "",
+    `  ${em("Options:")}`,
+    `    ${muted("--dry-run")}              Preview changes without writing any files`,
+    `    ${muted("--yes, -y")}              Non-interactive apply (no prompts)`,
+    `    ${muted("--target <kinds>")}       comma-separated: ${KNOWN_TARGETS.map((t) => t.kind).join(", ")}`,
+    `    ${muted("--api-key <sk-...>")}     API key (or PIRAMYD_API_KEY) — prober needs an admin key`,
+    `    ${muted("--model <id>")}           Default model id ${muted("(prober: show only this model)")}`,
+    `    ${muted("--json")}                 Machine-readable output`,
+    `    ${muted("--help, -h")}             Show this help message`,
+    "",
+    `  ${em("Env:")}     PIRAMYD_BASE_URL  PIRAMYD_API_KEY`,
+    "",
+  ].join("\n"));
+}
+
+function runStatus(cli) {
+  const rows = inspectAllTargets();
+  if (cli.json) {
+    console.log(JSON.stringify({ ok: true, targets: rows }, null, 2));
+    return;
+  }
+  console.log(renderBanner());
+  p.intro(pc.bgYellow(pc.black(" Status ")));
+  for (const row of rows) {
+    const state = !row.configured
+      ? muted("not configured")
+      : row.healthy
+        ? ok("healthy")
+        : pc.red("needs repair");
+    const lines = [
+      `  ${em(brand(row.label))}  ${muted(row.kind)}  ${state}`,
+      `  ${muted("Binary")}   ${row.binaryPath || muted("not in PATH")}`,
+      `  ${muted("Config")}   ${truncateMiddle(row.path, 55)} ${row.configExists ? ok("yes") : muted("no")}`,
+    ];
+    if (row.launcher) {
+      lines.push(`  ${muted("Launcher")} ${row.launcher} ${row.launcherExists ? ok("yes") : muted("no")}`);
+    }
+    lines.push(`  ${muted("Key")}      ${row.hasKey ? accent(row.keyPreview) : muted("missing")}`);
+    p.log.message(lines.join("\n"));
+    p.log.message(`  ${DIVIDER_THIN}`);
+  }
+  const healthy = rows.filter((row) => row.healthy).length;
+  p.outro(`${healthy}/${rows.length} targets healthy.`);
+}
+
+function runRestore(cli) {
+  const kind = cli.targets[0];
+  if (!kind) {
+    throw new Error("restore requires --target <kind>");
+  }
+  const result = restoreTarget(kind);
+  if (cli.json) {
+    console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+    return;
+  }
+  p.log.success(`Restored ${result.label} from ${result.restoredFrom}`);
+  p.outro(ok("Restore complete."));
+}
+
+async function runNonInteractiveOnboard(cli) {
+  const selectedTargets = resolveSelectedTargets(cli.targets);
+  if (!selectedTargets.length) {
+    throw new Error("non-interactive mode requires --target <kind>[,kind]");
+  }
+  const existingApiKey = findReusableApiKey(listAvailableTargets().length ? listAvailableTargets() : selectedTargets, selectedTargets[0]);
+  const apiKey = cli.apiKey || existingApiKey;
+  if (!apiKey || !apiKey.startsWith("sk-")) {
+    throw new Error("non-interactive mode requires --api-key sk-... or PIRAMYD_API_KEY");
+  }
+
+  let catalog;
+  try {
+    catalog = await loadCatalog(apiKey);
+  } catch (err) {
+    throw new Error(`Could not load Piramyd catalog: ${err.message || err}`);
+  }
+
+  const defaultModelId = cli.model || catalog.defaultModelId || (catalog.models[0] && catalog.models[0].id);
+  if (!defaultModelId) {
+    throw new Error("Catalog has no models. Pass --model <id> or check your key.");
+  }
+  catalog = applyCatalogSelection(catalog, defaultModelId, cli.model && !findModelById(catalog.models, cli.model)
+    ? [{ id: cli.model, name: `${cli.model} (cli)`, reasoning: false, input: ["text"], contextWindow: 0, maxTokens: 0 }]
+    : []);
+
+  if (cli.dryRun) {
+    for (const target of selectedTargets) {
+      const preview = generateConfig(target, apiKey, catalog);
+      p.log.message(`\n${em(`-- ${target.label}`)}`);
+      for (const file of preview.files) {
+        p.log.message(`${muted(`[${path.basename(file.path)}]`)}\n${file.content.slice(0, 2000)}`);
+      }
+    }
+    p.outro("Dry-run complete. No files were modified.");
+    return;
+  }
+
+  const results = [];
+  for (const target of selectedTargets) {
+    results.push({ target, ...writeConfig(target, apiKey, catalog) });
+  }
+  showSuccess({ results, catalog });
+  p.outro(ok("Non-interactive setup complete."));
+}
+
 // ── Main wizard ─────────────────────────────────────────────────
 async function main() {
-  const args = process.argv.slice(2);
-  const isDryRun = args.includes("--dry-run");
+  const cli = parseCliArgs(process.argv.slice(2));
+  const isDryRun = cli.dryRun;
 
-  if (args.includes("--help") || args.includes("-h")) {
-    console.log([
-      "",
-      brand(BANNER),
-      "",
-      `  ${muted("Universal AI Gateway")}  ${muted("\u2502")}  ${em(`v${VERSION}`)}`,
-      "",
-      `  ${em("Usage:")}   piramyd [command] [options]`,
-      "",
-      `  ${em("Commands:")}`,
-      `    ${muted("(default)")}     Interactive onboarding wizard`,
-      `    ${muted("doctor")}        Auto-detect and repair broken configurations`,
-      `    ${muted("models")}        Realtime health check for all models in your tier`,
-      "",
-      `  ${em("Options:")}`,
-      `    ${muted("--dry-run")}     Preview changes without writing any files`,
-      `    ${muted("--help, -h")}    Show this help message`,
-      "",
-    ].join("\n"));
+  if (cli.help) {
+    printHelp();
     process.exit(0);
   }
 
-  if (args.includes("doctor")) {
+  if (cli.command === "doctor") {
     return runDoctor();
   }
 
-  if (args.includes("models")) {
+  if (cli.command === "models") {
     return runModels();
+  }
+
+  if (cli.command === "prober") {
+    return runProber(cli);
+  }
+
+  if (cli.command === "status") {
+    return runStatus(cli);
+  }
+
+  if (cli.command === "restore") {
+    return runRestore(cli);
+  }
+
+  if (cli.yes) {
+    return runNonInteractiveOnboard(cli);
   }
 
   console.clear();
@@ -762,11 +1027,11 @@ async function main() {
   let catalog;
   try {
     catalog = await loadCatalog(apiKey);
-    if (!catalog.models.length) throw new Error("empty catalog");
     spinner.stop(`Catalog loaded: ${em(String(catalog.models.length))} models ${muted(`(tier ${catalog.tier.toUpperCase()})`)}`);
   } catch (err) {
-    catalog = buildEmergencyCatalog();
-    spinner.stop(`Catalog failed ${muted(`(${err.message})`)}. Using fallback.`);
+    spinner.stop(pc.red("Catalog failed."));
+    p.cancel(err.message || String(err));
+    process.exit(1);
   }
 
   const modelSelection = await askModelDefaultSelection(catalog);

@@ -6,7 +6,17 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-08
+
+### Removed
+- Local emergency catalog (`src/emergency-catalog.js`). If the Piramyd API is unreachable or empty, the CLI now errors instead of inventing models.
+
 ### Added
+- `piramyd prober`: prints the last stored probe round (latest probe session per model) as a terminal table, or `--json`. Read-only — no probing is triggered. Authenticates with a normal Piramyd API key (`--api-key` / `PIRAMYD_API_KEY`) that the API requires to belong to an admin user; reads `GET /v1/admin/prober/latest`. Supports `--model <provider_model_id>` to show a single model. New module `src/prober.js` + `tests/prober.unit.test.js`.
+- `piramyd status` / `piramyd status --json`: inspect CLI binaries, configs, launchers, and key presence.
+- `piramyd restore --target <kind>`: restore the latest `*.bak.<timestamp>` for that CLI.
+- Non-interactive onboarding: `--yes --target codex,claude --api-key sk-... --model gpt-5.6-sol`.
+- `PIRAMYD_BASE_URL` and `PIRAMYD_API_KEY` environment overrides.
 - `--dry-run` flag: preview generated configs without writing any files.
 - `--help` / `-h` flag: display usage information.
 - `generateConfig()` export in patchers: returns preview data without side-effects.
@@ -39,8 +49,7 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 - `.gitignore` expanded: covers `.env`, coverage, OS artifacts, IDE files.
 - Unused imports cleaned from `bin/piramyd.js`.
 - ESLint warnings resolved (unused vars, catch bindings).
-- Emergency catalog updated with current API models (`claude-opus-4.6`, `claude-sonnet-4-6`, `claude-sonnet-4`, `claude-opus-4-1`). Model IDs use bare names without tier prefixes — the API handles routing.
-- `FALLBACK_DEFAULT_MODEL` changed from `claude-sonnet-4.5` → `claude-sonnet-4-6`.
+- Defined missing `CODEX_NODE_SHIM_PATH` in constants (Windows Codex launcher).
 - Claude Code patcher now sets `ANTHROPIC_DEFAULT_OPUS_MODEL` when opus models are available in the catalog.
 
 ## [0.1.9]

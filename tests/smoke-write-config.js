@@ -61,7 +61,6 @@ function run() {
   testClaudeInvalidJsonThrowsFriendlyError();
   testCatalogSanitizeFromModelsFallback();
   testAggregateErrorFriendlyFormatting();
-  testFallbackModelIdConstant();
   console.log('smoke-write-config: ok');
 }
 
@@ -92,11 +91,6 @@ function testAggregateErrorFriendlyFormatting() {
 
   assert.strictEqual(messages.length >= 2, true);
   assert.strictEqual(messages.some((m) => m.includes('ECONNREFUSED')), true);
-}
-
-function testFallbackModelIdConstant() {
-  const emergencySource = fs.readFileSync(path.join(__dirname, '..', 'src', 'emergency-catalog.js'), 'utf8');
-  assert.strictEqual(emergencySource.includes('FALLBACK_DEFAULT_MODEL = "claude-sonnet-4-6"'), true);
 }
 
 run();

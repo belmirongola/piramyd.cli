@@ -189,6 +189,23 @@ function safeChmod(filePath, mode) {
     // Silently ignore on filesystems that don't support chmod
   }
 }
+function listBackupsForFile(filePath) {
+  const dir = path.dirname(filePath);
+  const base = path.basename(filePath);
+  if (!existsPath(dir)) return [];
+  const prefix = `${base}.bak.`;
+  return fs.readdirSync(dir)
+    .filter((name) => name.startsWith(prefix))
+    .map((name) => {
+      const full = path.join(dir, name);
+      const stamp = Number(name.slice(prefix.length)) || 0;
+      let mtime = 0;
+      try { mtime = fs.statSync(full).mtimeMs; } catch {}
+      return { path: full, stamp, mtime };
+    })
+    .sort((a, b) => (b.stamp - a.stamp) || (b.mtime - a.mtime));
+}
+
 function backupIfPresent(filePath, backups) {
   if (!exists(filePath)) return null;
   const original = fs.readFileSync(filePath);
@@ -221,6 +238,6 @@ module.exports = {
   coercePositiveNumber, maskApiKey, escapeRegex, stripAnsi, visibleLength,
   truncateMiddle, wrapPlainLine, padRight, renderTomlString, renderTomlKey,
   renderTomlArray, renderShellString, renderInlineTomlTable, normalizeConfigPath,
-  detectConfigKind, listAvailableTargets, fallbackBackupPath, backupIfPresent,
+  detectConfigKind, listAvailableTargets, fallbackBackupPath, listBackupsForFile, backupIfPresent,
   ensureParentDir, writeFileWithMode, safeChmod
 };

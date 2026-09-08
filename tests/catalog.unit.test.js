@@ -1,4 +1,4 @@
-const { normalizeCatalogEntry, sanitizeCatalog } = require('../src/catalog');
+const { normalizeCatalogEntry, sanitizeCatalog, modelHasVision, visionIcon, VISION_ICON } = require('../src/catalog');
 
 describe('catalog normalize/sanitize', () => {
   test('normalizeCatalogEntry keeps text model', () => {
@@ -26,6 +26,47 @@ describe('catalog normalize/sanitize', () => {
     expect(model).toBeNull();
   });
 
+  test('normalizeCatalogEntry marks vision from capabilities', () => {
+    const model = normalizeCatalogEntry({
+      id: 'gpt-vision',
+      type: 'model',
+      capabilities: ['text', 'vision'],
+    });
+
+    expect(model).toBeTruthy();
+    expect(model.hasVision).toBe(true);
+    expect(model.input).toEqual(['text', 'image']);
+  });
+
+  test('normalizeCatalogEntry marks vision from image_in and multimodal', () => {
+    const imageIn = normalizeCatalogEntry({
+      id: 'img-in',
+      type: 'model',
+      capabilities: ['text', 'image_in'],
+    });
+    const multimodal = normalizeCatalogEntry({
+      id: 'mm',
+      type: 'model',
+      capabilities: ['multimodal'],
+      input: ['text'],
+    });
+
+    expect(imageIn.hasVision).toBe(true);
+    expect(multimodal.hasVision).toBe(true);
+  });
+
+  test('normalizeCatalogEntry does not mark text-only models as vision', () => {
+    const model = normalizeCatalogEntry({
+      id: 'text-only',
+      type: 'model',
+      input: ['text'],
+      capabilities: ['text', 'tool-calling'],
+    });
+
+    expect(model.hasVision).toBe(false);
+    expect(model.input).toEqual(['text']);
+  });
+
   test('sanitizeCatalog removes duplicates and invalid entries', () => {
     const list = sanitizeCatalog([
       { id: 'a', type: 'model', input: ['text'] },
@@ -36,5 +77,13 @@ describe('catalog normalize/sanitize', () => {
 
     expect(list).toHaveLength(1);
     expect(list[0].id).toBe('a');
+  });
+
+  test('modelHasVision and visionIcon follow hasVision / input', () => {
+    expect(modelHasVision({ id: 'a', hasVision: true })).toBe(true);
+    expect(modelHasVision({ id: 'b', input: ['text', 'image'] })).toBe(true);
+    expect(modelHasVision({ id: 'c', input: ['text'] })).toBe(false);
+    expect(visionIcon({ hasVision: true })).toBe(VISION_ICON);
+    expect(visionIcon({ input: ['text'] })).toBe('');
   });
 });

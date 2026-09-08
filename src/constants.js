@@ -1,7 +1,7 @@
 const os = require("os");
 const path = require("path");
 
-const PIRAMYD_ROOT_URL = "https://api.piramyd.cloud";
+const PIRAMYD_ROOT_URL = String(process.env.PIRAMYD_BASE_URL || "https://api.piramyd.cloud").replace(/\/+$/, "");
 const PIRAMYD_OPENAI_BASE_URL = `${PIRAMYD_ROOT_URL}/v1`;
 const PIRAMYD_ANTHROPIC_BASE_URL = PIRAMYD_ROOT_URL;
 
@@ -17,10 +17,14 @@ const LOCAL_BIN_DIR = IS_WINDOWS
   : path.resolve(os.homedir(), ".local/bin");
 
 const CODEX_SECRET_PATH = path.resolve(os.homedir(), ".codex", "piramyd.env");
+const CODEX_NODE_SHIM_PATH = path.resolve(os.homedir(), ".codex", "piramyd-node-shim.js");
 const CODEX_LAUNCHER_PATH = path.resolve(LOCAL_BIN_DIR, IS_WINDOWS ? "codex-piramyd.cmd" : "codex-piramyd");
 const CLAUDE_CONFIG_DIR = path.resolve(os.homedir(), ".claude-piramyd");
 const CLAUDE_SETTINGS_PATH = path.resolve(CLAUDE_CONFIG_DIR, "settings.json");
+const CLAUDE_ENV_PATH = path.resolve(CLAUDE_CONFIG_DIR, "piramyd.env");
 const CLAUDE_LAUNCHER_PATH = path.resolve(LOCAL_BIN_DIR, IS_WINDOWS ? "claude-piramyd.cmd" : "claude-piramyd");
+const COPILOT_ENV_PATH = path.resolve(os.homedir(), ".copilot", "piramyd.env");
+const COPILOT_LAUNCHER_PATH = path.resolve(LOCAL_BIN_DIR, IS_WINDOWS ? "copilot-piramyd.cmd" : "copilot-piramyd");
 
 const KNOWN_TARGETS = [
   {
@@ -82,7 +86,8 @@ const KNOWN_TARGETS = [
 module.exports = {
   PIRAMYD_ROOT_URL, PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL,
   CODEX_PROFILE, CODEX_MODEL_PROVIDER, GENERATED_START, GENERATED_END,
-  LOCAL_BIN_DIR, CODEX_SECRET_PATH, CODEX_LAUNCHER_PATH,
-  CLAUDE_CONFIG_DIR, CLAUDE_SETTINGS_PATH, CLAUDE_LAUNCHER_PATH,
+  LOCAL_BIN_DIR, CODEX_SECRET_PATH, CODEX_NODE_SHIM_PATH, CODEX_LAUNCHER_PATH,
+  CLAUDE_CONFIG_DIR, CLAUDE_SETTINGS_PATH, CLAUDE_ENV_PATH, CLAUDE_LAUNCHER_PATH,
+  COPILOT_ENV_PATH, COPILOT_LAUNCHER_PATH,
   KNOWN_TARGETS, IS_WINDOWS
 };

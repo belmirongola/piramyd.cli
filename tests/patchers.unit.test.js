@@ -127,30 +127,37 @@ describe('patchers', () => {
       const result = patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
       const config = readJson(target.path);
 
-      expect(config.env.ANTHROPIC_BASE_URL).toBe('https://api.piramyd.cloud');
-      expect(config.env.ANTHROPIC_AUTH_TOKEN).toBe(TEST_API_KEY);
+      // Auth lives in launcher + .env file (NOT in settings.json).
+      // settings.json only carries user-facing fields (model, permissions, etc).
       expect(config.model).toBe('claude-sonnet-4-6');
+      expect(config.env).toBeUndefined();
 
-      const launcherPath = result.artifacts.find((artifact) => artifact.includes('claude-piramyd'));
+      const launcherPath = result.artifacts.find((artifact) => artifact.endsWith('claude-piramyd') || artifact.endsWith('claude-piramyd.cmd'));
       expect(launcherPath).toBeTruthy();
       const launcher = read(launcherPath);
       expect(launcher).toContain('CLAUDE_CONFIG_DIR=');
       expect(launcher).toContain('.claude-piramyd');
       expect(launcher).toContain('ANTHROPIC_BASE_URL=');
       expect(launcher).toContain('https://api.piramyd.cloud');
-      expect(launcher).toContain('ANTHROPIC_API_KEY=');
-      expect(launcher).toContain('--bare');
+      expect(launcher).toContain('ANTHROPIC_API_KEY');
+
+      const envPath = result.artifacts.find((artifact) => artifact.endsWith('piramyd.env'));
+      expect(envPath).toBeTruthy();
+      const envContents = read(envPath);
+      expect(envContents).toContain(TEST_API_KEY);
     });
 
     test('preserves existing fields in isolated settings', () => {
       const target = { kind: 'claude', path: path.join(tmpHome, '.claude-piramyd', 'settings.json'), binaryPath: 'claude' };
-      write(target.path, JSON.stringify({ permissions: { allow: ['tool1'] }, env: { MY_VAR: 'hello' } }, null, 2));
+      write(target.path, JSON.stringify({ permissions: { allow: ['tool1'] }, env: { MY_VAR: 'hello', ANTHROPIC_AUTH_TOKEN: 'stale' } }, null, 2));
 
       patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
       const config = readJson(target.path);
       expect(config.permissions.allow).toContain('tool1');
+      // User-defined env vars are preserved; auth-related ones are scrubbed
+      // (auth now lives in the launcher + .env file).
       expect(config.env.MY_VAR).toBe('hello');
-      expect(config.env.ANTHROPIC_AUTH_TOKEN).toBe(TEST_API_KEY);
+      expect(config.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
       expect(config.model).toBe('claude-sonnet-4-6');
     });
 

@@ -7,7 +7,10 @@ CLI wizard for onboarding code agents (Codex, Claude Code, Kimi, OpenClaw, Gemin
 ## Quick Commands
 
 ```bash
-npm test          # ESLint + Jest (94 tests)
+npm test          # ESLint + Jest
+npx piramyd status
+npx piramyd restore --target codex
+npx piramyd --yes --target codex --api-key sk-... --model gpt-5.6-sol
 npm run test:smoke  # Smoke test (node-based assertions)
 npm run lint      # ESLint only
 ```
@@ -21,9 +24,12 @@ src/
   catalog.js            # Remote model catalog fetch + sanitization
   patchers.js           # Config generation/writing for all 7 targets
   toml.js               # Lightweight TOML section parser
-  utils.js              # 24+ shared utilities (platform-aware)
+  utils.js              # shared utilities (platform-aware)
   diagnosis.js          # Health-check: read existing keys, detect broken configs
-  emergency-catalog.js  # Hardcoded fallback catalog + model helpers
+  cli-args.js           # argv parser (commands + flags)
+  ops.js                # status + restore
+  model-probes.js       # `models` — realtime health probes with the user's key
+  prober.js             # `prober` — read last probe round from piramyd.api (admin API key)
 ```
 
 ## Conventions

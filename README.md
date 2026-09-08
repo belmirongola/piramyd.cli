@@ -44,6 +44,40 @@ npx piramyd
 npx piramyd doctor
 ```
 
+### Estado, restore e modo não-interactivo
+
+```bash
+npx piramyd status
+npx piramyd status --json
+npx piramyd restore --target codex
+npx piramyd --yes --target codex --api-key sk-... --model gpt-5.6-sol
+npx piramyd --dry-run --yes --target claude --api-key sk-...
+```
+
+`PIRAMYD_BASE_URL` aponta o wizard a um gateway diferente (staging / self-host). `PIRAMYD_API_KEY` evita colar a chave no prompt.
+
+### Prober (última rodada de probes)
+
+Imprime a última rodada de probes que o prober agendado guardou na base de dados —
+a sessão mais recente de cada modelo. Não dispara nada; é só leitura.
+
+Autentica com uma **API key `sk-...` normal**, mas a API exige que essa key
+pertença a um utilizador admin (`is_superuser`). Passa em `--api-key` ou na env
+`PIRAMYD_API_KEY`; sem ela (e sem `--json`) pede num prompt escondido.
+
+```bash
+npx piramyd prober                       # todos os modelos da última rodada
+npx piramyd prober --model gpt-5.6-sol    # só um modelo
+npx piramyd prober --json                 # saída machine-readable
+npx piramyd prober --api-key sk-...
+```
+
+A tabela mostra status, `◉` (visão), tools, streaming, probes ok/total,
+confiança de normalização, duração e há quanto tempo foi probado.
+
+Env: `PIRAMYD_API_KEY` (a admin key), `PIRAMYD_BASE_URL` (API, default
+`https://api.piramyd.cloud`). Fonte: `GET /v1/admin/prober/latest`.
+
 ## O que é alterado por target
 
 - **Codex CLI**
