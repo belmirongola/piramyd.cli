@@ -6,6 +6,10 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-11
+
+Re-published as 0.2.1 — the 0.2.0 npm publish never completed (blocked on 2FA), so this version carries the same changes below plus the version bump.
+
 ## [0.2.0] - 2026-09-08
 
 ### Removed

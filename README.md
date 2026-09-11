@@ -81,8 +81,8 @@ Env: `PIRAMYD_API_KEY` (a admin key), `PIRAMYD_BASE_URL` (API, default
 ## O que é alterado por target
 
 - **Codex CLI**
-  - Atualiza `~/.codex/config.toml` com profile Piramyd
-  - Cria profile + provider dedicados (`[profiles.piramyd]` + `[model_providers.piramyd]`) com `wire_api = "responses"`
+  - Atualiza `~/.codex/config.toml` com o provider Piramyd (`[model_providers.piramyd]`, `wire_api = "responses"`)
+  - Cria o overlay `~/.codex/piramyd.config.toml` para `codex --profile piramyd` (sem a tabela legado `[profiles.piramyd]`)
   - Cria/atualiza segredo em `~/.codex/piramyd.env`
   - Cria launcher `codex-piramyd` em `~/.local/bin` (ou caminho equivalente no Windows)
   - Mantém `base_url` cloud (`https://api.piramyd.cloud/v1`) e aceita `PIRAMYD_DEBUG=1` para diagnosticar env/base_url/fingerprint de chave

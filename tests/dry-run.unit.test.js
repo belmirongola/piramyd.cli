@@ -46,15 +46,18 @@ describe('generateConfig (dry-run preview)', () => {
     expect(preview.config).toContain(TEST_API_KEY);
   });
 
-  test('codex — returns config + 2 extra files (env, launcher)', () => {
+  test('codex — returns config + overlay + env + launcher', () => {
     const dir = mkTmpDir();
     const filePath = path.join(dir, 'config.toml');
     const target = { kind: 'codex', path: filePath };
 
     const preview = generateConfig(target, TEST_API_KEY, TEST_CATALOG);
-    expect(preview.files.length).toBe(3); // config + env + launcher
-    expect(preview.files[1].content).toContain('OPENAI_API_KEY=');
-    expect(preview.files[2].content).toContain('codex');
+    expect(preview.files.length).toBe(4);
+    expect(preview.config).not.toContain('[profiles.piramyd]');
+    expect(preview.files[1].path).toContain('piramyd.config.toml');
+    expect(preview.files[1].content).toContain('model_provider = "piramyd"');
+    expect(preview.files[2].content).toContain('OPENAI_API_KEY=');
+    expect(preview.files[3].content).toContain('codex');
   });
 });
 

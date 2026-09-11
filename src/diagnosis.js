@@ -88,22 +88,34 @@ function findReusableApiKey(targets, selectedTarget) {
   return "";
 }
 
+function hasLegacyCodexProfileTable(raw) {
+  const profileHeader = `[profiles.${CODEX_PROFILE}]`;
+  const profileSelector = new RegExp(`^\\s*profile\\s*=\\s*"${CODEX_PROFILE}"\\s*$`, "m");
+  return raw.includes(profileHeader) || profileSelector.test(raw);
+}
+
+function hasCodexPiramydProvider(raw) {
+  const providerHeader = `[model_providers.${CODEX_MODEL_PROVIDER}]`;
+  const baseUrlLine = `base_url = "${PIRAMYD_OPENAI_BASE_URL}"`;
+  const wireApiLine = 'wire_api = "responses"';
+  return raw.includes(providerHeader) && raw.includes(baseUrlLine) && raw.includes(wireApiLine);
+}
+
 /**
- * Check whether Codex config.toml contains the expected Piramyd sections.
+ * Check whether Codex uses the overlay profile file plus a Piramyd provider,
+ * without the legacy `[profiles.piramyd]` table Codex now rejects.
  */
 function codexHasExpectedConfig(filePath) {
   if (!exists(filePath)) return false;
   const raw = fs.readFileSync(filePath, "utf8");
-  const profileHeader = `[profiles.${CODEX_PROFILE}]`;
-  const providerHeader = `[model_providers.${CODEX_MODEL_PROVIDER}]`;
+  if (hasLegacyCodexProfileTable(raw)) return false;
+  const overlayPath = path.join(path.dirname(filePath), `${CODEX_PROFILE}.config.toml`);
+  if (!exists(overlayPath)) return false;
+  const overlay = fs.readFileSync(overlayPath, "utf8");
+  if (hasLegacyCodexProfileTable(overlay)) return false;
   const providerLine = `model_provider = "${CODEX_MODEL_PROVIDER}"`;
-  const baseUrlLine = `base_url = "${PIRAMYD_OPENAI_BASE_URL}"`;
-  const wireApiLine = 'wire_api = "responses"';
-  return raw.includes(profileHeader)
-    && raw.includes(providerHeader)
-    && raw.includes(providerLine)
-    && raw.includes(baseUrlLine)
-    && raw.includes(wireApiLine);
+  return (hasCodexPiramydProvider(raw) || hasCodexPiramydProvider(overlay))
+    && overlay.includes(providerLine);
 }
 
 /**

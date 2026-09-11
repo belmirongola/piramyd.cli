@@ -336,13 +336,21 @@ describe('patchers', () => {
       const result = patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
       const content = read(target.path);
 
-      expect(content).toContain('[profiles.piramyd]');
+      expect(content).not.toContain('[profiles.piramyd]');
+      expect(content).not.toContain('profile = "piramyd"');
       expect(content).toContain('[model_providers.piramyd]');
       expect(content).toContain('# >>> piramyd-onboard:start');
       expect(content).toContain('# <<< piramyd-onboard:end');
       expect(content).toContain('base_url = "https://api.piramyd.cloud/v1"');
       expect(content).toContain('wire_api = "responses"');
-      expect(result.artifacts.length).toBe(2);
+      const overlayPath = path.join(tmpHome, '.codex', 'piramyd.config.toml');
+      expect(result.artifacts).toContain(overlayPath);
+      const overlay = read(overlayPath);
+      expect(overlay).toContain('model_provider = "piramyd"');
+      expect(overlay).toContain('model = "claude-sonnet-4-6"');
+      expect(overlay).toContain('[model_providers.piramyd]');
+      expect(overlay).not.toContain('[profiles.piramyd]');
+      expect(result.artifacts.length).toBe(3);
     });
 
     test('preserves user sections', () => {
@@ -358,7 +366,41 @@ describe('patchers', () => {
       const content = read(target.path);
       expect(content).toContain('[profiles.default]');
       expect(content).toContain('model_provider = "openai"');
-      expect(content).toContain('[profiles.piramyd]');
+      expect(content).not.toContain('[profiles.piramyd]');
+      expect(content).toContain('[model_providers.piramyd]');
+    });
+
+    test('migrates legacy [profiles.piramyd] into overlay file', () => {
+      const target = { kind: 'codex', path: path.join(tmpHome, '.codex', 'config.toml') };
+      const overlayPath = path.join(tmpHome, '.codex', 'piramyd.config.toml');
+      write(target.path, [
+        'profile = "piramyd"',
+        '',
+        '[profiles.piramyd]',
+        'model_provider = "piramyd"',
+        'model = "old-default"',
+        '',
+        '[projects."/tmp/example"]',
+        'trust_level = "trusted"',
+      ].join('\n'));
+      write(overlayPath, [
+        'model = "keep-me-if-catalog-overrides"',
+        'model_reasoning_effort = "high"',
+        '',
+        '[projects."/tmp/keep"]',
+        'trust_level = "trusted"',
+      ].join('\n'));
+
+      patchers.writeConfig(target, TEST_API_KEY, TEST_CATALOG);
+      const content = read(target.path);
+      expect(content).not.toContain('[profiles.piramyd]');
+      expect(content).not.toContain('profile = "piramyd"');
+      expect(content).toContain('[projects."/tmp/example"]');
+      const overlay = read(overlayPath);
+      expect(overlay).toContain('model = "claude-sonnet-4-6"');
+      expect(overlay).toContain('model_reasoning_effort = "high"');
+      expect(overlay).toContain('[projects."/tmp/keep"]');
+      expect(overlay).not.toContain('[profiles.piramyd]');
     });
 
     test('idempotency', () => {

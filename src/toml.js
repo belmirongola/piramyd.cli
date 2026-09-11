@@ -36,6 +36,16 @@ function upsertTopLevelSetting(lines, key, value) {
   updated.splice(insertAt, 0, `${key} = ${value}`);
   return updated;
 }
+function hasTopLevelSetting(lines, key) {
+  const matcher = new RegExp(`^\\s*${escapeRegex(key)}\\s*=`);
+  return lines.some((line) => matcher.test(line));
+}
+function dropTopLevelSetting(lines, key, value) {
+  const matcher = value === undefined || value === null
+    ? new RegExp(`^\\s*${escapeRegex(key)}\\s*=`)
+    : new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*${escapeRegex(value)}\\s*$`);
+  return lines.filter((line) => !matcher.test(line));
+}
 function trimBoundaryBlankLines(lines) {
   const copy = [...lines];
   while (copy.length && copy[0].trim() === "") copy.shift();
@@ -43,4 +53,10 @@ function trimBoundaryBlankLines(lines) {
   return copy;
 }
 
-module.exports = { parseTomlSections, upsertTopLevelSetting, trimBoundaryBlankLines };
+module.exports = {
+  parseTomlSections,
+  upsertTopLevelSetting,
+  hasTopLevelSetting,
+  dropTopLevelSetting,
+  trimBoundaryBlankLines,
+};

@@ -3,7 +3,7 @@ const os = require("os");
 const path = require("path");
 const {
   CODEX_PROFILE, CODEX_MODEL_PROVIDER, GENERATED_START, GENERATED_END,
-  PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL, CODEX_SECRET_PATH, CODEX_NODE_SHIM_PATH, CODEX_LAUNCHER_PATH,
+  PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ANTHROPIC_BASE_URL, CODEX_SECRET_PATH, CODEX_PROFILE_CONFIG_PATH, CODEX_NODE_SHIM_PATH, CODEX_LAUNCHER_PATH,
   CLAUDE_SETTINGS_PATH, CLAUDE_ENV_PATH, CLAUDE_LAUNCHER_PATH,
   COPILOT_ENV_PATH, COPILOT_LAUNCHER_PATH, IS_WINDOWS
 } = require("./constants");
@@ -11,7 +11,7 @@ const {
   exists, escapeRegex, renderTomlString, renderTomlArray, renderShellString,
   aliasFromId, backupIfPresent, writeFileWithMode
 } = require("./utils");
-const { parseTomlSections, upsertTopLevelSetting, trimBoundaryBlankLines } = require("./toml");
+const { parseTomlSections, upsertTopLevelSetting, hasTopLevelSetting, dropTopLevelSetting, trimBoundaryBlankLines } = require("./toml");
 
 function loadJsonConfig(filePath, targetLabel) {
   if (!exists(filePath)) return {};
@@ -194,21 +194,17 @@ function updateKimiConfig(filePath, apiKey, models, userTier = "free", selectedD
   chunks.push(renderKimiGeneratedBlock(apiKey, models));
   return chunks.filter(Boolean).join("\n\n") + "\n";
 }
-function renderCodexGeneratedBlock(models, selectedDefaultModelId = "") {
+function pickCodexDefaultModel(models, selectedDefaultModelId = "") {
   const preferredModelId = String(selectedDefaultModelId || "").trim();
   const hasPreferredModel = preferredModelId
     ? models.some((model) => String(model.id || "") === preferredModelId)
     : false;
   const defaultModelId = hasPreferredModel ? preferredModelId : firstModelId(models);
   if (!defaultModelId) throw new Error("No model available from API catalog to set as default for Codex.");
+  return defaultModelId;
+}
+function renderCodexProviderSection() {
   return [
-    GENERATED_START,
-    "# Piramyd profile/provider. Launcher injects OPENAI_BASE_URL and OPENAI_API_KEY.",
-    `[profiles.${CODEX_PROFILE}]`,
-    `model_provider = ${renderTomlString(CODEX_MODEL_PROVIDER)}`,
-    `model = ${renderTomlString(defaultModelId)}`,
-    'model_reasoning_effort = "medium"',
-    "",
     `[model_providers.${CODEX_MODEL_PROVIDER}]`,
     'name = "Piramyd"',
     `base_url = ${renderTomlString(PIRAMYD_OPENAI_BASE_URL)}`,
@@ -218,17 +214,31 @@ function renderCodexGeneratedBlock(models, selectedDefaultModelId = "") {
     'stream_max_retries = 4',
     'stream_idle_timeout_ms = 300000',
     'supports_websockets = false',
+  ].join("\n");
+}
+function renderCodexGeneratedBlock() {
+  return [
+    GENERATED_START,
+    "# Piramyd provider. Profile defaults live in piramyd.config.toml (Codex --profile overlay).",
+    "# Do not put a nested profiles table or a top-level profile selector in this file.",
+    renderCodexProviderSection(),
     GENERATED_END,
   ].join("\n");
 }
 function shouldDropCodexSection(header) {
   return header === `profiles.${CODEX_PROFILE}` || header === `model_providers.${CODEX_MODEL_PROVIDER}`;
 }
-function updateCodexConfig(filePath, models, selectedDefaultModelId = "") {
+function resolveCodexProfileOverlayPath(configTomlPath) {
+  if (configTomlPath) return path.join(path.dirname(configTomlPath), `${CODEX_PROFILE}.config.toml`);
+  return CODEX_PROFILE_CONFIG_PATH;
+}
+function updateCodexConfig(filePath) {
   const raw = exists(filePath) ? stripGeneratedBlock(fs.readFileSync(filePath, "utf8")) : "";
   const { preamble, sections } = parseTomlSections(raw);
   const retainedSections = sections.filter((section) => !shouldDropCodexSection(section.header));
-  const updatedPreamble = trimBoundaryBlankLines(preamble);
+  const updatedPreamble = trimBoundaryBlankLines(
+    dropTopLevelSetting(preamble, "profile", `"${CODEX_PROFILE}"`)
+  );
 
   const chunks = [];
   if (updatedPreamble.length) chunks.push(updatedPreamble.join("\n"));
@@ -240,7 +250,40 @@ function updateCodexConfig(filePath, models, selectedDefaultModelId = "") {
         .join("\n\n")
     );
   }
-  chunks.push(renderCodexGeneratedBlock(models, selectedDefaultModelId));
+  chunks.push(renderCodexGeneratedBlock());
+  return chunks.filter(Boolean).join("\n\n") + "\n";
+}
+function updateCodexProfileOverlay(filePath, models, selectedDefaultModelId = "") {
+  const defaultModelId = pickCodexDefaultModel(models, selectedDefaultModelId);
+  const raw = exists(filePath) ? stripGeneratedBlock(fs.readFileSync(filePath, "utf8")) : "";
+  const { preamble, sections } = parseTomlSections(raw);
+  const retainedSections = sections.filter((section) => !shouldDropCodexSection(section.header));
+  let updatedPreamble = dropTopLevelSetting(preamble, "profile", `"${CODEX_PROFILE}"`);
+  updatedPreamble = upsertTopLevelSetting(
+    updatedPreamble,
+    "model_provider",
+    renderTomlString(CODEX_MODEL_PROVIDER)
+  );
+  updatedPreamble = upsertTopLevelSetting(updatedPreamble, "model", renderTomlString(defaultModelId));
+  if (!hasTopLevelSetting(updatedPreamble, "model_reasoning_effort")) {
+    updatedPreamble = upsertTopLevelSetting(updatedPreamble, "model_reasoning_effort", '"medium"');
+  }
+  updatedPreamble = trimBoundaryBlankLines(updatedPreamble);
+
+  const chunks = [];
+  if (!raw.trim()) {
+    chunks.push(`# Piramyd profile. Loaded via \`codex --profile ${CODEX_PROFILE}\` (or the codex-piramyd wrapper).`);
+  }
+  if (updatedPreamble.length) chunks.push(updatedPreamble.join("\n"));
+  if (retainedSections.length) {
+    chunks.push(
+      retainedSections
+        .map((section) => trimBoundaryBlankLines(section.lines).join("\n"))
+        .filter(Boolean)
+        .join("\n\n")
+    );
+  }
+  chunks.push(renderCodexProviderSection());
   return chunks.filter(Boolean).join("\n\n") + "\n";
 }
 function renderCodexSecretFile(apiKey) {
@@ -589,7 +632,7 @@ function generateConfig(target, apiKey, catalog) {
   let next;
   if (target.kind === "kimi") next = updateKimiConfig(target.path, apiKey, models, tier, selectedDefaultModelId);
   if (target.kind === "openclaw") next = updateOpenClawConfig(target.path, apiKey, models, tier, selectedDefaultModelId);
-  if (target.kind === "codex") next = updateCodexConfig(target.path, models, selectedDefaultModelId);
+  if (target.kind === "codex") next = updateCodexConfig(target.path);
   if (target.kind === "claude") next = updateClaudeConfig(target.path, apiKey, models, tier, selectedDefaultModelId);
   if (target.kind === "gemini") next = updateGeminiConfig(target.path, apiKey);
   if (target.kind === "qwen") next = updateQwenConfig(target.path, apiKey, models, tier, selectedDefaultModelId);
@@ -600,8 +643,11 @@ function generateConfig(target, apiKey, catalog) {
 
   const result = { config: next, files: [{ path: target.path, content: next }] };
   if (target.kind === "codex") {
+    const overlayPath = resolveCodexProfileOverlayPath(target.path);
+    const overlayContent = updateCodexProfileOverlay(overlayPath, models, selectedDefaultModelId);
     const secretContent = renderCodexSecretFile(apiKey);
     const launcherContent = renderCodexLauncher(target.binaryPath);
+    result.files.push({ path: overlayPath, content: overlayContent });
     result.files.push({ path: CODEX_SECRET_PATH, content: secretContent, mode: 0o600 });
     if (IS_WINDOWS) result.files.push({ path: CODEX_NODE_SHIM_PATH, content: renderCodexNodeShimWindows(target.binaryPath), mode: 0o600 });
     result.files.push({ path: CODEX_LAUNCHER_PATH, content: launcherContent, mode: 0o755 });
@@ -640,9 +686,13 @@ function writeConfig(target, apiKey, catalog, options = {}) {
   const artifacts = [];
   if (target.kind === "codex" || target.kind === "claude" || target.kind === "copilot") {
     const extraFiles = target.kind === "copilot" ? generated.files : generated.files.slice(1);
-    if (target.kind === "codex") backupIfPresent(CODEX_SECRET_PATH, backups);
-    if (target.kind === "codex" && IS_WINDOWS) backupIfPresent(CODEX_NODE_SHIM_PATH, backups);
-    if (target.kind === "codex") backupIfPresent(CODEX_LAUNCHER_PATH, backups);
+    if (target.kind === "codex") {
+      const overlayFile = generated.files.find((file) => file.path.endsWith(`${CODEX_PROFILE}.config.toml`));
+      if (overlayFile) backupIfPresent(overlayFile.path, backups);
+      backupIfPresent(CODEX_SECRET_PATH, backups);
+      if (IS_WINDOWS) backupIfPresent(CODEX_NODE_SHIM_PATH, backups);
+      backupIfPresent(CODEX_LAUNCHER_PATH, backups);
+    }
     if (target.kind === "claude") backupIfPresent(CLAUDE_ENV_PATH, backups);
     if (target.kind === "claude") backupIfPresent(CLAUDE_LAUNCHER_PATH, backups);
     if (target.kind === "copilot") backupIfPresent(COPILOT_ENV_PATH, backups);
