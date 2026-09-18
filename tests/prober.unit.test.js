@@ -1,4 +1,10 @@
-const { summarizeSession, relativeAge } = require("../src/prober");
+const {
+  summarizeSession,
+  relativeAge,
+  extractSseDataLines,
+  checkChunkForIssues,
+  VALID_FINISH_REASONS,
+} = require("../src/prober");
 
 describe("summarizeSession", () => {
   test("flattens a stored ModelProbeSession row", () => {
@@ -85,5 +91,70 @@ describe("relativeAge", () => {
   test("empty / invalid input", () => {
     expect(relativeAge(null, now)).toBe("");
     expect(relativeAge("not-a-date", now)).toBe("");
+  });
+});
+
+describe("live contract check helpers", () => {
+  test("VALID_FINISH_REASONS matches the OpenAI enum", () => {
+    expect([...VALID_FINISH_REASONS].sort()).toEqual(
+      ["content_filter", "function_call", "length", "stop", "tool_calls"].sort()
+    );
+  });
+
+  test("extractSseDataLines skips [DONE] and non-data lines", () => {
+    const raw = [
+      ": heartbeat",
+      'data: {"a":1}',
+      "",
+      "data: [DONE]",
+      'data: {"b":2}',
+    ].join("\n");
+    expect(extractSseDataLines(raw)).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
+  test("checkChunkForIssues flags empty finish_reason (swastic pattern)", () => {
+    const issues = new Set();
+    const seenModels = new Set();
+    checkChunkForIssues(
+      { model: "claude-opus-4.8", choices: [{ finish_reason: "" }] },
+      "claude-opus-4.8",
+      issues,
+      seenModels
+    );
+    expect([...issues]).toEqual([expect.stringContaining('invalid finish_reason: ""')]);
+  });
+
+  test("checkChunkForIssues accepts null and valid enum finish_reason values", () => {
+    const issues = new Set();
+    const seenModels = new Set();
+    checkChunkForIssues({ choices: [{ finish_reason: null }] }, "m", issues, seenModels);
+    checkChunkForIssues({ choices: [{ finish_reason: "stop" }] }, "m", issues, seenModels);
+    checkChunkForIssues({ choices: [{ finish_reason: "tool_calls" }] }, "m", issues, seenModels);
+    expect(issues.size).toBe(0);
+  });
+
+  test("checkChunkForIssues flags leaked provider and system_fingerprint fields", () => {
+    const issues = new Set();
+    const seenModels = new Set();
+    checkChunkForIssues(
+      { model: "m", provider: "kagiro", system_fingerprint: "fp_kagiro_123", choices: [] },
+      "m",
+      issues,
+      seenModels
+    );
+    expect([...issues].some((i) => i.includes("provider field leaked"))).toBe(true);
+    expect([...issues].some((i) => i.includes("system_fingerprint leaked"))).toBe(true);
+  });
+
+  test("checkChunkForIssues collects the raw model id for the caller to compare (model leak)", () => {
+    const issues = new Set();
+    const seenModels = new Set();
+    checkChunkForIssues(
+      { model: "kagiro/minimax-m3", choices: [{ finish_reason: "stop" }] },
+      "claude-opus-4.8",
+      issues,
+      seenModels
+    );
+    expect(seenModels.has("kagiro/minimax-m3")).toBe(true);
   });
 });

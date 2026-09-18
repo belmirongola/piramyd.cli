@@ -6,6 +6,12 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-18
+
+### Added
+- `piramyd prober --live [--model <id> | --all]`: sends real requests (non-stream + stream) to the public API right now and validates the response contract Piramyd is supposed to guarantee — finish_reason is null or a valid OpenAI enum member on *every* stream chunk (not just the terminal one), `response.model` always equals the model the client asked for (never the internally-substituted or raw upstream/provider id), and no `provider`/`system_fingerprint` field leaks. Exits with code 1 on any failure, so it's usable in scripts/CI. `--json` for machine-readable output. This is a black-box check of the live API, independent of the stored probe DB — it's what actually caught the swastic `finish_reason:""` bug and the streaming model-identity leak.
+- Stored-round table (`npx piramyd prober`, no `--live`) now surfaces known response-integrity quirks from the last cloud probe (`streaming_finish_reason_invalid`, `non_standard_errors`) as inline warnings per model, plus a summary line pointing at `--live` to re-verify.
+
 ## [0.2.1] - 2026-09-11
 
 Re-published as 0.2.1 — the 0.2.0 npm publish never completed (blocked on 2FA), so this version carries the same changes below plus the version bump.

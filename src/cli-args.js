@@ -8,7 +8,14 @@ function parseCliArgs(argv) {
 
   for (let i = 0; i < raw.length; i += 1) {
     const token = String(raw[i] || "");
-    if (token === "--dry-run" || token === "--yes" || token === "--json" || token === "--help") {
+    if (
+      token === "--dry-run" ||
+      token === "--yes" ||
+      token === "--json" ||
+      token === "--help" ||
+      token === "--live" ||
+      token === "--all"
+    ) {
       flags.add(token);
       continue;
     }
@@ -49,6 +56,8 @@ function parseCliArgs(argv) {
     yes: flags.has("--yes"),
     json: flags.has("--json"),
     help: flags.has("--help"),
+    live: flags.has("--live"),
+    all: flags.has("--all"),
     targets,
     apiKey: String(opts["api-key"] || process.env.PIRAMYD_API_KEY || "").trim(),
     model: String(opts.model || "").trim(),

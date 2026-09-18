@@ -19,6 +19,7 @@ const {
   fetchLatestProbeRun,
   summarizeSession,
   relativeAge,
+  checkModelsContract,
 } = require("../src/prober");
 const { KNOWN_TARGETS } = require("../src/constants");
 
@@ -765,7 +766,15 @@ function formatProberRow(row) {
   const time = typeof row.elapsedMs === "number" ? `${(row.elapsedMs / 1000).toFixed(1)}s` : muted("-");
   const age = relativeAge(row.probedAt) || muted("-");
 
-  return `  ${padRight(statusText, PROBE_STATUS_WIDTH)} ${padRight(name, PROBE_NAME_WIDTH)} ${padRight(vision, PROBE_FLAG_WIDTH)} ${padRight(proberFlagCell(row.supportsTools), PROBE_FLAG_WIDTH)} ${padRight(proberFlagCell(row.supportsStreaming), PROBE_FLAG_WIDTH)} ${padRight(count, PROBE_COUNT_WIDTH)} ${padRight(conf, PROBE_CONF_WIDTH)} ${padRight(time, PROBE_TIME_WIDTH)} ${padRight(age, PROBE_TIME_WIDTH)}`;
+  const line = `  ${padRight(statusText, PROBE_STATUS_WIDTH)} ${padRight(name, PROBE_NAME_WIDTH)} ${padRight(vision, PROBE_FLAG_WIDTH)} ${padRight(proberFlagCell(row.supportsTools), PROBE_FLAG_WIDTH)} ${padRight(proberFlagCell(row.supportsStreaming), PROBE_FLAG_WIDTH)} ${padRight(count, PROBE_COUNT_WIDTH)} ${padRight(conf, PROBE_CONF_WIDTH)} ${padRight(time, PROBE_TIME_WIDTH)} ${padRight(age, PROBE_TIME_WIDTH)}`;
+
+  const flags = [];
+  if (row.finishReasonInvalid) {
+    flags.push(pc.red(`⚠ bad finish_reason mid-stream (${row.finishReasonInvalidValues.map((v) => JSON.stringify(v)).join(", ")})`));
+  }
+  if (row.nonStandardErrors) flags.push(pc.yellow("⚠ non-standard error shape"));
+
+  return flags.length ? `${line}\n  ${padRight("", PROBE_STATUS_WIDTH)} ${flags.join("  ")}` : line;
 }
 
 function showProberSummary(rows) {
@@ -786,8 +795,110 @@ function showProberSummary(rows) {
       console.log(`  ${pc.red("!")} ${row.provider}/${row.model} ${muted("—")} ${truncateMiddle(String(row.error), 60)}`);
     }
   }
+  const integrity = rows.filter((row) => row.finishReasonInvalid || row.nonStandardErrors);
+  if (integrity.length) {
+    console.log("");
+    console.log(`  ${pc.yellow(`⚠ ${integrity.length} model${integrity.length === 1 ? "" : "s"} with known response-integrity issues`)} ${muted("— run `npx piramyd prober --live` to re-verify against the live API")}`);
+  }
   console.log(DIVIDER);
   console.log("");
+}
+
+// ── prober --live (real request against the public API, right now) ──
+function renderLiveHeader() {
+  return `  ${padRight(muted("Result"), PROBE_STATUS_WIDTH)} ${padRight(muted("Model"), PROBE_NAME_WIDTH)} ${padRight(muted("Time"), PROBE_TIME_WIDTH)} ${muted("Issues")}`;
+}
+
+function formatLiveRow(result) {
+  const statusText = result.ok ? ok("● OK") : pc.red("● FAIL");
+  const name = truncateMiddle(result.modelId, PROBE_NAME_WIDTH);
+  const time = `${(result.elapsedMs / 1000).toFixed(1)}s`;
+  const issues = result.ok ? "" : result.issues.map((i) => pc.red(i)).join("; ");
+  return `  ${padRight(statusText, PROBE_STATUS_WIDTH)} ${padRight(name, PROBE_NAME_WIDTH)} ${padRight(time, PROBE_TIME_WIDTH)} ${issues}`;
+}
+
+async function runProberLive(cli) {
+  const jsonOut = cli.json;
+
+  if (!jsonOut) {
+    console.clear();
+    console.log(renderModelsBanner());
+    p.intro(pc.bgYellow(pc.black(" Piramyd Prober — live contract check ")));
+  }
+
+  const apiKey = cli.apiKey || (jsonOut ? "" : await promptProberApiKey());
+  if (!apiKey || !apiKey.startsWith("sk-")) {
+    throw new Error("prober --live requires an API key: --api-key sk-... or PIRAMYD_API_KEY");
+  }
+
+  const apiUrl = (cli.apiBase || DEFAULT_API_URL).replace(/\/+$/, "");
+
+  let modelIds = [];
+  if (cli.model) {
+    modelIds = [cli.model];
+  } else if (cli.all) {
+    const spinner = jsonOut ? null : p.spinner();
+    if (spinner) spinner.start("Loading catalog...");
+    try {
+      const catalog = await loadCatalog(apiKey);
+      modelIds = catalog.models.map((m) => m.id);
+    } catch (err) {
+      if (spinner) spinner.stop(pc.red("Could not load catalog."));
+      throw new Error(`catalog load failed: ${err.message || err}`);
+    }
+    if (spinner) spinner.stop(`${em(String(modelIds.length))} models in catalog`);
+  } else {
+    throw new Error("prober --live requires --model <id> (one model) or --all (whole catalog).");
+  }
+
+  const spinner = jsonOut ? null : p.spinner();
+  if (spinner) spinner.start(`Sending real requests to ${modelIds.length} model${modelIds.length === 1 ? "" : "s"}...`);
+
+  const results = await checkModelsContract(apiUrl, apiKey, modelIds, {
+    concurrency: 3,
+    timeoutMs: 30_000,
+    onProgress: (_result, done, total) => {
+      if (spinner) spinner.message(`Checked ${done}/${total}...`);
+    },
+  });
+
+  const failed = results.filter((r) => !r.ok);
+
+  if (spinner) {
+    spinner.stop(
+      failed.length
+        ? pc.red(`${failed.length}/${results.length} model(s) failed the contract check`)
+        : ok(`All ${results.length} model(s) passed the contract check`)
+    );
+  }
+
+  if (jsonOut) {
+    console.log(JSON.stringify({ ok: failed.length === 0, api: apiUrl, total: results.length, failed: failed.length, results }, null, 2));
+    if (failed.length) process.exitCode = 1;
+    return;
+  }
+
+  console.log(DIVIDER);
+  console.log(`  ${em("Target:")}   ${apiUrl}/v1/chat/completions`);
+  console.log(`  ${em("Checks:")}   finish_reason validity (every stream chunk) · model identity leak · provider/system_fingerprint leak`);
+  console.log(DIVIDER);
+  console.log("");
+  console.log(renderLiveHeader());
+  for (const result of results) {
+    console.log(formatLiveRow(result));
+  }
+  console.log("");
+  console.log(DIVIDER);
+  console.log(`  ${em("Passed:")} ${ok(String(results.length - failed.length))}  ${em("Failed:")} ${failed.length ? pc.red(String(failed.length)) : "0"}`);
+  console.log(DIVIDER);
+  console.log("");
+
+  if (failed.length) {
+    process.exitCode = 1;
+    p.outro(pc.red(`${failed.length} model(s) failed — see Issues column above.`));
+  } else {
+    p.outro(ok("All checked models honor the response contract."));
+  }
 }
 
 async function runProber(cli) {
@@ -866,6 +977,8 @@ function printHelp() {
     `    ${muted("doctor")}        Auto-detect and repair broken configurations`,
     `    ${muted("models")}        Realtime health check for all models in your tier`,
     `    ${muted("prober")}        Print the last probe round from the database (admin API key)`,
+    `    ${muted("prober --live")}  Send real requests to the public API right now and validate the`,
+    `                     response contract (finish_reason, model identity, provider leaks)`,
     `    ${muted("status")}        Show installed CLI state and drift`,
     `    ${muted("restore")}       Restore the latest backup for a target`,
     "",
@@ -874,7 +987,9 @@ function printHelp() {
     `    ${muted("--yes, -y")}              Non-interactive apply (no prompts)`,
     `    ${muted("--target <kinds>")}       comma-separated: ${KNOWN_TARGETS.map((t) => t.kind).join(", ")}`,
     `    ${muted("--api-key <sk-...>")}     API key (or PIRAMYD_API_KEY) — prober needs an admin key`,
-    `    ${muted("--model <id>")}           Default model id ${muted("(prober: show only this model)")}`,
+    `    ${muted("--model <id>")}           Default model id ${muted("(prober: show/check only this model)")}`,
+    `    ${muted("--live")}                 prober: check the live public API instead of stored history`,
+    `    ${muted("--all")}                  prober --live: check every model in the catalog`,
     `    ${muted("--json")}                 Machine-readable output`,
     `    ${muted("--help, -h")}             Show this help message`,
     "",
@@ -992,7 +1107,7 @@ async function main() {
   }
 
   if (cli.command === "prober") {
-    return runProber(cli);
+    return cli.live ? runProberLive(cli) : runProber(cli);
   }
 
   if (cli.command === "status") {
