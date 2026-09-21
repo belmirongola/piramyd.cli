@@ -30,6 +30,7 @@ src/
   ops.js                # status + restore
   model-probes.js       # `models` — realtime health probes with the user's key
   prober.js             # `prober` — read last probe round from piramyd.api (admin API key)
+  chat.js               # `chat` — reconcile conversation history across profiles
 ```
 
 ## Conventions

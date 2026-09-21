@@ -27,6 +27,13 @@ const CLAUDE_LAUNCHER_PATH = path.resolve(LOCAL_BIN_DIR, IS_WINDOWS ? "claude-pi
 const COPILOT_ENV_PATH = path.resolve(os.homedir(), ".copilot", "piramyd.env");
 const COPILOT_LAUNCHER_PATH = path.resolve(LOCAL_BIN_DIR, IS_WINDOWS ? "copilot-piramyd.cmd" : "copilot-piramyd");
 
+// ── Chat stores ─────────────────────────────────────────────────
+// Root of each CLI's home. Claude keeps one projects/ tree per profile; Codex
+// keeps a single shared ~/.codex/sessions tree and tags each rollout with the
+// provider it ran against. src/chat.js derives the per-profile paths from these.
+const CLAUDE_HOME_DIR = path.resolve(os.homedir(), ".claude");
+const CODEX_HOME_DIR = path.resolve(os.homedir(), ".codex");
+
 const KNOWN_TARGETS = [
   {
     kind: "codex",
@@ -90,5 +97,6 @@ module.exports = {
   LOCAL_BIN_DIR, CODEX_SECRET_PATH, CODEX_PROFILE_CONFIG_PATH, CODEX_NODE_SHIM_PATH, CODEX_LAUNCHER_PATH,
   CLAUDE_CONFIG_DIR, CLAUDE_SETTINGS_PATH, CLAUDE_ENV_PATH, CLAUDE_LAUNCHER_PATH,
   COPILOT_ENV_PATH, COPILOT_LAUNCHER_PATH,
+  CLAUDE_HOME_DIR, CODEX_HOME_DIR,
   KNOWN_TARGETS, IS_WINDOWS
 };

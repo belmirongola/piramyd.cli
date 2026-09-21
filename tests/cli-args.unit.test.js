@@ -39,6 +39,23 @@ describe("parseCliArgs", () => {
     expect(parsed.model).toBe("gpt-4o-mini");
   });
 
+  test("chat is a command with --from/--to", () => {
+    const parsed = parseCliArgs(["chat", "--from", "claude", "--to", "claude-piramyd", "--dry-run"]);
+    expect(parsed.command).toBe("chat");
+    expect(parsed.from).toBe("claude");
+    expect(parsed.to).toBe("claude-piramyd");
+    expect(parsed.dryRun).toBe(true);
+  });
+
+  test("chat --from/--to accept = syntax and default to empty", () => {
+    const eq = parseCliArgs(["chat", "--from=codex", "--to=codex-piramyd"]);
+    expect(eq.from).toBe("codex");
+    expect(eq.to).toBe("codex-piramyd");
+    const bare = parseCliArgs(["chat"]);
+    expect(bare.from).toBe("");
+    expect(bare.to).toBe("");
+  });
+
   test("prober api key falls back to PIRAMYD_API_KEY env", () => {
     const prev = process.env.PIRAMYD_API_KEY;
     process.env.PIRAMYD_API_KEY = "sk-env";

@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["doctor", "models", "status", "restore", "prober"]);
+const COMMANDS = new Set(["doctor", "models", "status", "restore", "prober", "chat"]);
 
 function parseCliArgs(argv) {
   const raw = Array.isArray(argv) ? argv.slice() : [];
@@ -62,6 +62,8 @@ function parseCliArgs(argv) {
     apiKey: String(opts["api-key"] || process.env.PIRAMYD_API_KEY || "").trim(),
     model: String(opts.model || "").trim(),
     apiBase: String(opts["api-base"] || process.env.PIRAMYD_BASE_URL || "").trim(),
+    from: String(opts.from || "").trim().toLowerCase(),
+    to: String(opts.to || "").trim().toLowerCase(),
   };
 }
 

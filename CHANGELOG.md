@@ -6,6 +6,22 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 
 ## [Unreleased]
 
+### Added
+- `piramyd chat`: reconcile conversation history across the isolated Piramyd profiles. The toolkit runs each CLI through its own profile (`claude-piramyd` uses `CLAUDE_CONFIG_DIR=~/.claude-piramyd`, `codex-piramyd` uses `--profile piramyd`), which deliberately keeps them apart — but that also traps chats in whichever profile created them. `chat` inventories both stores and reports what exists in each, what is missing from one, and what is shared. Without `--from`/`--to` it is entirely read-only.
+- `piramyd chat --from <profile> --to <profile> [--dry-run|--yes]`: import sessions that are missing from another profile of the **same** CLI. Strictly additive — never overwrites, never duplicates, and a second run is a no-op. `--dry-run` prints the plan and writes nothing.
+- `piramyd chat --json`: machine-readable inventory, reconciliation, and import plan.
+- Turn extraction is measured against the real stores rather than guessed. On the Claude side a `user` record counts only when `toolUseResult` is absent, `isMeta` is not true, and `isSidechain` is not true — across 30 sampled files, a present `toolUseResult` implied a tool result in 9284/9284 cases, so without that filter the count inflates roughly 22×. Harness-only prefixes (`task-notification`, `local-command-*`, `command-name`) are excluded, while `<pasted_content>` is kept because it is real user input. On the Codex side only `response_item` message records are counted — `event_msg.agent_message` is a near-duplicate mirror of the same assistant text and must not be summed.
+- Titles resolve by precedence: Claude `custom-title`, then the **last** `ai-title` (they are cumulative and get rewritten as a conversation develops — 5 of 28 sessions changed mid-life), then Codex `state_5.sqlite` `threads.title` (populated for 51 of 52 rollouts), then the first real prompt. `session_index.jsonl` is deliberately not used as the primary source: it holds only 16 distinct ids for 52 sessions.
+- Same session id under two different working directories is reported as ambiguous (`▲ difere`) and never merged.
+- Sessions are read by streaming line-by-line: the largest Codex rollout is 40.9 MB across 591 lines, with individual lines over 1 MB, so no transcript is ever loaded whole.
+- `codex` and `codex-piramyd` share one storage tree (`~/.codex/sessions`), distinguished only by the `model_provider` recorded inside each rollout — so `chat` inventories Codex (showing the split, e.g. `31 nativo · 21 piramyd`) but refuses to import between them and explains why, rather than appearing to act.
+- New module `src/chat.js` and `tests/chat.unit.test.js` (31 tests).
+- New constants for the chat stores in `src/constants.js`.
+
+### Notes
+- The Claude cwd slug is lossy (`/`, `.`, and spaces all collapse to `-`, while spaces are sometimes preserved literally), so the real path is always read from the `cwd` field inside the transcript rather than reverse-engineered from the directory name.
+- Related: `syncClaudeState()` already copies Claude state one-way into `~/.claude-piramyd`, but it deletes and re-copies `projects/` and `sessions/` with no backup for directories. `chat` does not reuse that path, and never touches `sessions/` — it is a live per-process registry containing session tokens, not chat history.
+
 ## [0.3.0] - 2026-09-18
 
 ### Added

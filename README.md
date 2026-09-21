@@ -56,6 +56,49 @@ npx piramyd --dry-run --yes --target claude --api-key sk-...
 
 `PIRAMYD_BASE_URL` aponta o wizard a um gateway diferente (staging / self-host). `PIRAMYD_API_KEY` evita colar a chave no prompt.
 
+### Chat (conciliação de conversas entre perfis)
+
+O toolkit isola cada CLI num perfil próprio (`claude-piramyd` usa
+`~/.claude-piramyd`, `codex-piramyd` usa o perfil `piramyd`). Esse isolamento é
+propositado, mas tem um efeito colateral: **os chats ficam presos no perfil onde
+foram criados**. O `chat` inventaria os dois perfis e mostra o que existe, o que
+falta e o que corresponde — e pode trazer para um perfil as sessões que só
+existem no outro.
+
+```bash
+npx piramyd chat                      # inventário + conciliação (só leitura)
+npx piramyd chat --json               # saída machine-readable
+npx piramyd chat --from claude-piramyd --to claude --dry-run   # mostra o plano
+npx piramyd chat --from claude-piramyd --to claude --yes       # aplica
+```
+
+Estados na tabela: `● ambos` (existe nos dois), `● só A` / `● só B` (só num),
+`▲ difere` (mesmo id mas `cwd` diferente — não é fundido), `▲ live` (a decorrer).
+
+**Onde estão os chats**
+
+| Perfil | Local |
+|---|---|
+| `claude` | `~/.claude/projects/<slug>/<sessão>.jsonl` |
+| `claude-piramyd` | `~/.claude-piramyd/projects/<slug>/<sessão>.jsonl` |
+| `codex` / `codex-piramyd` | `~/.codex/sessions/AAAA/MM/DD/rollout-*.jsonl` (árvore partilhada) |
+
+**Import é aditivo puro:** só acrescenta sessões que faltam no destino. Nunca
+sobrescreve, nunca duplica, e uma segunda execução não faz nada. Sem `--from`/
+`--to` o comando é 100% de leitura. O registo de processos vivos
+(`sessions/<pid>.json`), que contém tokens de sessão, nunca é tocado.
+
+**Codex:** os dois perfis escrevem na **mesma** árvore `~/.codex/sessions` — o que
+os distingue é o campo `model_provider` dentro de cada rollout. Como não há dois
+destinos separados, o `chat` faz o inventário do Codex (mostrando o split, ex.
+`31 nativo · 21 piramyd`) mas recusa importar entre eles, explicando porquê.
+
+**Limitações conhecidas (v1):** apenas Claude e Codex. O Gemini guarda chats
+parciais em `~/.gemini/tmp/` (efémero, e sobretudo turnos do utilizador);
+Kimi e Copilot não têm diretório; OpenClaw tem o esquema mas zero registos; Qwen
+e OpenCode só guardam configuração. Conversão entre CLIs diferentes (ex.: Claude
+→ Codex) ainda não existe.
+
 ### Prober (última rodada de probes)
 
 Imprime a última rodada de probes que o prober agendado guardou na base de dados —
