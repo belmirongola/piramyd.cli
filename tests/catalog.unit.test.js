@@ -26,6 +26,14 @@ describe('catalog normalize/sanitize', () => {
     expect(model).toBeNull();
   });
 
+  test('normalizeCatalogEntry filters embeddings, speech and System One models', () => {
+    const base = { type: 'chat', input: ['text'] };
+    expect(normalizeCatalogEntry({ ...base, id: 'bge-m3', architecture: 'embeddings' })).toBeNull();
+    expect(normalizeCatalogEntry({ ...base, id: 'jev-latest', architecture: 'systemone' })).toBeNull();
+    expect(normalizeCatalogEntry({ ...base, id: 'whisper', endpoints: ['/v1/audio/transcriptions'] })).toBeNull();
+    expect(normalizeCatalogEntry({ ...base, id: 'chat', architecture: 'completions', endpoint: '/v1/chat/completions' })).toBeTruthy();
+  });
+
   test('normalizeCatalogEntry marks vision from capabilities', () => {
     const model = normalizeCatalogEntry({
       id: 'gpt-vision',

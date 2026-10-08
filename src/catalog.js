@@ -180,6 +180,13 @@ function normalizeCatalogEntry(entry) {
 
   if (capabilities.includes("image-generation") || capabilities.includes("image_generation") || capabilities.includes("text-to-image")) return null;
 
+  // Embeddings, speech and System One models have their own endpoint: a coding
+  // CLI cannot use them, and probing them with a chat request always fails.
+  const architecture = String(entry.architecture || "").toLowerCase();
+  if (architecture && architecture !== "completions" && architecture !== "messages") return null;
+  const NON_CHAT_PATHS = ["/embeddings", "/audio/", "/systemone"];
+  if ([endpoint, ...endpoints].some((e) => NON_CHAT_PATHS.some((path) => e.includes(path)))) return null;
+
   // We want to ensure it has conversational or text completion capabilities.
   const hasText = input.includes("text") || input.length === 0 || capabilities.includes("chat") || capabilities.includes("text-generation");
   if (!hasText && type !== "model") return null;
