@@ -9,6 +9,8 @@ const { runProber, runProberLive } = require("../src/commands/prober");
 const { runChat } = require("../src/commands/chat");
 const { runStatus, runRestore } = require("../src/commands/status");
 const { runLogin, runLogout, runWhoami } = require("../src/commands/session");
+const { runTest } = require("../src/commands/check");
+const { runUpdate } = require("../src/commands/update");
 
 async function main() {
   const cli = parseCliArgs(process.argv.slice(2));
@@ -22,6 +24,8 @@ async function main() {
     login: runLogin,
     logout: runLogout,
     whoami: runWhoami,
+    test: runTest,
+    update: runUpdate,
     doctor: runDoctor,
     models: runModels,
     prober: (c) => (c.live ? runProberLive(c) : runProber(c)),

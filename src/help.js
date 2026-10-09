@@ -14,6 +14,8 @@ function printHelp() {
     `    ${muted("(default)")}     Interactive onboarding wizard`,
     `    ${muted("login")}         Save your API key once; every command reuses it`,
     `    ${muted("logout")}        Forget the saved key`,
+    `    ${muted("test")}          End-to-end check: key, chat, stream, Kairos and each configured CLI`,
+    `    ${muted("update")}        Check npm for a newer toolkit version`,
     `    ${muted("whoami")}        Show which key is in use and where it comes from`,
     `    ${muted("doctor")}        Auto-detect and repair broken configurations`,
     `    ${muted("models")}        Realtime health check for all models in your tier`,

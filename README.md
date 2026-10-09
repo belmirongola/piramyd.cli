@@ -15,6 +15,7 @@ CLI wizard de onboarding para conectar agentes de código em terminal ao gateway
 - Aplica patch nas configs de cada CLI
 - Cria backups antes de escrever alterações
 - Oferece modo de reparo automático (`doctor`)
+- `piramyd test` valida key, chat, stream, o fallback `kairos` e cada CLI configurada; `piramyd update` verifica a versão no npm; `piramyd models --json --filter glm` para scripts
 
 ## Targets suportados
 

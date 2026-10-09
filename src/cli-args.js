@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["doctor", "models", "status", "restore", "prober", "chat", "login", "logout", "whoami"]);
+const COMMANDS = new Set(["doctor", "models", "status", "restore", "prober", "chat", "login", "logout", "whoami", "test", "update"]);
 
 function parseCliArgs(argv) {
   const raw = Array.isArray(argv) ? argv.slice() : [];

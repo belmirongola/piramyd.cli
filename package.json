@@ -1,6 +1,6 @@
 {
   "name": "piramyd",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Interactive Piramyd onboarding for Codex, Claude Code, Kimi, OpenClaw, Gemini, Qwen, and OpenCode.",
   "bin": {
     "piramyd": "bin/piramyd.js"

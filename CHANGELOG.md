@@ -6,7 +6,12 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-09
+
 ### Added
+- `piramyd test`: end-to-end check with your key (catalog, chat, SSE stream, the `kairos` fallback) plus the state of every configured CLI. `--json` for scripts; exits non-zero on failure.
+- `piramyd update`: compares the installed version with npm.
+- `piramyd models`: `--json`, `--filter <text>`, `--concurrency <n>`, latency percentiles (median/p95/slowest) and a list of the models that are down.
 - Saved API key: the key is asked once and kept in `~/.piramyd/credentials.json` (mode 600); every command reuses it until the user changes it. New `login`, `logout`, `whoami` commands and a `--change-key` flag; a key passed with `--api-key` replaces the saved one; `PIRAMYD_API_KEY` is used but never persisted. A key already present in a CLI config is adopted on first use.
 - `piramyd chat`: reconcile conversation history across the isolated Piramyd profiles. The toolkit runs each CLI through its own profile (`claude-piramyd` uses `CLAUDE_CONFIG_DIR=~/.claude-piramyd`, `codex-piramyd` uses `--profile piramyd`), which deliberately keeps them apart — but that also traps chats in whichever profile created them. `chat` inventories both stores and reports what exists in each, what is missing from one, and what is shared. Without `--from`/`--to` it is entirely read-only.
 - `piramyd chat --from <profile> --to <profile> [--dry-run|--yes]`: import sessions that are missing from another profile of the **same** CLI. Strictly additive — never overwrites, never duplicates, and a second run is a no-op. `--dry-run` prints the plan and writes nothing.
