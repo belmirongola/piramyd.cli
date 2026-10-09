@@ -6,6 +6,11 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-09
+
+### Changed
+- Every duration shown in the UI is now in seconds (`piramyd models`, `piramyd test`). `--json` output keeps raw milliseconds.
+
 ## [0.4.0] - 2026-10-09
 
 ### Added
