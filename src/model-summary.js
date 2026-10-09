@@ -20,9 +20,11 @@ function summarizeProbeResults(results) {
   };
 }
 
-function formatMs(value) {
-  if (!Number.isFinite(value)) return "-";
-  return value >= 10_000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`;
+/** Durations are shown in seconds everywhere in the UI (JSON output keeps raw milliseconds). */
+function formatSeconds(valueMs) {
+  if (!Number.isFinite(valueMs)) return "-";
+  if (valueMs > 0 && valueMs < 100) return "<0.1s";
+  return `${(valueMs / 1000).toFixed(1)}s`;
 }
 
 function filterModels(models, filter) {
@@ -31,4 +33,4 @@ function filterModels(models, filter) {
   return models.filter((model) => String(model.id || "").toLowerCase().includes(needle));
 }
 
-module.exports = { summarizeProbeResults, filterModels, formatMs, percentile };
+module.exports = { summarizeProbeResults, filterModels, formatSeconds, percentile };

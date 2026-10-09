@@ -6,7 +6,7 @@ const { loadCatalog, modelHasVision, VISION_ICON } = require("../catalog");
 const { findReusableApiKey } = require("../diagnosis");
 const { probeModelsConcurrent } = require("../model-probes");
 const { obtainApiKey, authHint } = require("../key-flow");
-const { summarizeProbeResults, filterModels, formatMs } = require("../model-summary");
+const { summarizeProbeResults, filterModels, formatSeconds } = require("../model-summary");
 
 const MODEL_STATUS_WIDTH = 8;
 
@@ -26,7 +26,7 @@ function showModelProbeResults(catalog, results) {
   console.log(DIVIDER);
   console.log(`  ${em("Tier:")} ${brand(String(catalog.tier || "unknown").toUpperCase())}`);
   console.log(`  ${em("Models checked:")} ${summary.total}  ${ok(String(summary.up))} up  ${summary.down ? pc.red(String(summary.down)) : muted("0")} down`);
-  console.log(`  ${em("Latency:")} median ${em(formatMs(summary.p50_ms))}  p95 ${em(formatMs(summary.p95_ms))}  slowest ${em(formatMs(summary.slowest_ms))}`);
+  console.log(`  ${em("Latency:")} median ${em(formatSeconds(summary.p50_ms))}  p95 ${em(formatSeconds(summary.p95_ms))}  slowest ${em(formatSeconds(summary.slowest_ms))}`);
   console.log(`  ${em("Vision models:")} ${brand(VISION_ICON)} ${String(visionCount)}`);
   if (downRows.length) {
     console.log("");
@@ -42,7 +42,7 @@ function showModelProbeResults(catalog, results) {
 function formatModelProbeRow(catalog, result) {
   const model = catalog.models.find((entry) => entry.id === result.modelId);
   const status = result.ok ? ok("● UP") : pc.red("● DOWN");
-  const latency = result.latencyMs ? `${result.latencyMs}ms` : "-";
+  const latency = formatSeconds(result.latencyMs);
   const name = model ? model.id : result.modelId;
   const vision = padRight(modelHasVision(model) ? brand(VISION_ICON) : "", MODEL_VISION_WIDTH);
   const paddedStatus = padRight(status, MODEL_STATUS_WIDTH);

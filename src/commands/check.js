@@ -7,12 +7,12 @@ const { findReusableApiKey } = require("../diagnosis");
 const { inspectAllTargets } = require("../ops");
 const { obtainApiKey, authHint } = require("../key-flow");
 const { checkChat, checkStream } = require("../gateway-check");
-const { formatMs } = require("../model-summary");
+const { formatSeconds } = require("../model-summary");
 
 function row(result) {
   const mark = result.ok ? ok("\u2713") : pc.red("\u2717");
   const detail = result.ok ? muted(result.detail) : pc.red(result.detail);
-  return `  ${mark} ${padRight(truncateMiddle(result.name, 28), 28)} ${padRight(muted(formatMs(result.ms)), 8)} ${detail}`;
+  return `  ${mark} ${padRight(truncateMiddle(result.name, 28), 28)} ${padRight(muted(formatSeconds(result.ms)), 8)} ${detail}`;
 }
 
 /** `piramyd test`: the same calls a coding CLI makes, plus the state of each configured CLI. */

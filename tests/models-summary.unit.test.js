@@ -1,4 +1,4 @@
-const { summarizeProbeResults, filterModels, formatMs } = require("../src/model-summary");
+const { summarizeProbeResults, filterModels, formatSeconds } = require("../src/model-summary");
 const { parseCliArgs } = require("../src/cli-args");
 
 describe("models summary", () => {
@@ -26,10 +26,14 @@ describe("models summary", () => {
     expect(filterModels(models, "")).toHaveLength(3);
   });
 
-  test("formats milliseconds and seconds", () => {
-    expect(formatMs(850)).toBe("850ms");
-    expect(formatMs(12345)).toBe("12.3s");
-    expect(formatMs(null)).toBe("-");
+  test("formats every duration in seconds", () => {
+    expect(formatSeconds(870)).toBe("0.9s");
+    expect(formatSeconds(3567)).toBe("3.6s");
+    expect(formatSeconds(12345)).toBe("12.3s");
+    expect(formatSeconds(51031)).toBe("51.0s");
+    expect(formatSeconds(40)).toBe("<0.1s");
+    expect(formatSeconds(0)).toBe("0.0s");
+    expect(formatSeconds(null)).toBe("-");
   });
 
   test("parses --filter and clamps --concurrency", () => {
