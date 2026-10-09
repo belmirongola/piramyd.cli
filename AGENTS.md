@@ -18,7 +18,13 @@ npm run lint      # ESLint only
 ## Architecture
 
 ```
-bin/piramyd.js          # CLI entrypoint — interactive UI (clack/prompts)
+bin/piramyd.js          # CLI entrypoint — only parses args and dispatches to src/commands/*
+src/
+  ui.js                 # brand colours, banner, progress (single source of look & feel)
+  key-flow.js           # obtainApiKey: saved key reused, asked only when missing/changed
+  credentials.js        # ~/.piramyd/credentials.json store (0600)
+  commands/             # onboard, doctor, models, prober, chat, status/restore, login/logout/whoami
+  help.js               # --help text
 src/
   constants.js          # Target definitions, URLs, paths (IS_WINDOWS flag)
   catalog.js            # Remote model catalog fetch + sanitization

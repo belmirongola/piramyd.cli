@@ -1,0 +1,47 @@
+const { brand, muted, em, VERSION, BANNER } = require("./ui");
+const { KNOWN_TARGETS } = require("./constants");
+
+function printHelp() {
+  console.log([
+    "",
+    brand(BANNER),
+    "",
+    `  ${muted("Universal AI Gateway")}  ${muted("\u2502")}  ${em(`v${VERSION}`)}`,
+    "",
+    `  ${em("Usage:")}   piramyd [command] [options]`,
+    "",
+    `  ${em("Commands:")}`,
+    `    ${muted("(default)")}     Interactive onboarding wizard`,
+    `    ${muted("login")}         Save your API key once; every command reuses it`,
+    `    ${muted("logout")}        Forget the saved key`,
+    `    ${muted("whoami")}        Show which key is in use and where it comes from`,
+    `    ${muted("doctor")}        Auto-detect and repair broken configurations`,
+    `    ${muted("models")}        Realtime health check for all models in your tier`,
+    `    ${muted("prober")}        Print the last probe round from the database (admin API key)`,
+    `    ${muted("prober --live")}  Send real requests to the public API right now and validate the`,
+    `                     response contract (finish_reason, model identity, provider leaks)`,
+    `    ${muted("status")}        Show installed CLI state and drift`,
+    `    ${muted("restore")}       Restore the latest backup for a target`,
+    `    ${muted("chat")}          Reconcile conversation history across Piramyd profiles`,
+    `    ${muted("chat --from")}   Import sessions missing from another profile`,
+    "",
+    `  ${em("Options:")}`,
+    `    ${muted("--dry-run")}              Preview changes without writing any files`,
+    `    ${muted("--yes, -y")}              Non-interactive apply (no prompts)`,
+    `    ${muted("--target <kinds>")}       comma-separated: ${KNOWN_TARGETS.map((t) => t.kind).join(", ")}`,
+    `    ${muted("--api-key <sk-...>")}     API key, saved for next time (or PIRAMYD_API_KEY) — prober needs an admin key`,
+    `    ${muted("--model <id>")}           Default model id ${muted("(prober: show/check only this model)")}`,
+    `    ${muted("--live")}                 prober: check the live public API instead of stored history`,
+    `    ${muted("--all")}                  prober --live: check every model in the catalog`,
+    `    ${muted("--from <profile>")}        chat: source profile (claude, claude-piramyd, ...)`,
+    `    ${muted("--to <profile>")}          chat: destination profile`,
+    `    ${muted("--change-key")}           Ask for a new key even if one is saved`,
+    `    ${muted("--json")}                 Machine-readable output`,
+    `    ${muted("--help, -h")}             Show this help message`,
+    "",
+    `  ${em("Env:")}     PIRAMYD_BASE_URL  PIRAMYD_API_KEY`,
+    "",
+  ].join("\n"));
+}
+
+module.exports = { printHelp };
