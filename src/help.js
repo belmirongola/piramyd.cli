@@ -35,6 +35,8 @@ function printHelp() {
     `    ${muted("--all")}                  prober --live: check every model in the catalog`,
     `    ${muted("--from <profile>")}        chat: source profile (claude, claude-piramyd, ...)`,
     `    ${muted("--to <profile>")}          chat: destination profile`,
+    `    ${muted("--filter <text>")}        models: only probe model ids containing the text`,
+    `    ${muted("--concurrency <n>")}      models: parallel probes (1-16, default 4)`,
     `    ${muted("--change-key")}           Ask for a new key even if one is saved`,
     `    ${muted("--json")}                 Machine-readable output`,
     `    ${muted("--help, -h")}             Show this help message`,

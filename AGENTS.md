@@ -25,7 +25,6 @@ src/
   credentials.js        # ~/.piramyd/credentials.json store (0600)
   commands/             # onboard, doctor, models, prober, chat, status/restore, login/logout/whoami
   help.js               # --help text
-src/
   constants.js          # Target definitions, URLs, paths (IS_WINDOWS flag)
   catalog.js            # Remote model catalog fetch + sanitization
   patchers.js           # Config generation/writing for all 7 targets

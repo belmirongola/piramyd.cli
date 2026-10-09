@@ -67,6 +67,8 @@ function parseCliArgs(argv) {
     apiKeyFlag: String(opts["api-key"] || "").trim(),
     model: String(opts.model || "").trim(),
     apiBase: String(opts["api-base"] || process.env.PIRAMYD_BASE_URL || "").trim(),
+    filter: String(opts.filter || "").trim().toLowerCase(),
+    concurrency: Math.max(1, Math.min(16, Number.parseInt(opts.concurrency, 10) || 4)),
     from: String(opts.from || "").trim().toLowerCase(),
     to: String(opts.to || "").trim().toLowerCase(),
   };
