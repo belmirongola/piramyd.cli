@@ -23,6 +23,10 @@ The format is based on Keep a Changelog and this project follows SemVer principl
 - The Claude cwd slug is lossy (`/`, `.`, and spaces all collapse to `-`, while spaces are sometimes preserved literally), so the real path is always read from the `cwd` field inside the transcript rather than reverse-engineered from the directory name.
 - Related: `syncClaudeState()` already copies Claude state one-way into `~/.claude-piramyd`, but it deletes and re-copies `projects/` and `sessions/` with no backup for directories. `chat` does not reuse that path, and never touches `sessions/` — it is a live per-process registry containing session tokens, not chat history.
 
+### Fixed
+- Keys with the `pyd-key-` prefix were rejected everywhere the toolkit checked for `sk-`.
+- A rejected key (401/403) no longer falls back to the public model list, which hid the real problem behind an "unknown tier" catalog.
+
 ## [0.3.0] - 2026-09-18
 
 ### Added
