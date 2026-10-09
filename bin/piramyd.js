@@ -13,6 +13,16 @@ const { targetBaseUrl, targetDefaultModel, writeConfig, generateConfig } = requi
 const { getExistingApiKey, findReusableApiKey, targetNeedsRepair, codexShimHealth, syncClaudeState } = require("../src/diagnosis");
 const { probeModelsConcurrent } = require("../src/model-probes");
 const { parseCliArgs } = require("../src/cli-args");
+const {
+  SLOT_USER,
+  SLOT_ADMIN,
+  isPiramydKey,
+  credentialsPath,
+  saveKey,
+  clearKeys,
+  getSavedKey,
+  resolveStoredApiKey,
+} = require("../src/credentials");
 const { inspectAllTargets, restoreTarget, resolveSelectedTargets } = require("../src/ops");
 const {
   DEFAULT_API_URL,
@@ -293,24 +303,68 @@ async function chooseConfig(targets) {
 }
 
 // ── API key prompt ──────────────────────────────────────────────
-async function promptApiKey(existingApiKey) {
-  if (existingApiKey) {
-    p.log.info(`${ok("\u2713")} Found existing key ${accent(maskApiKey(existingApiKey))}`);
+async function promptNewApiKey({ admin = false } = {}) {
+  const value = await p.password({
+    message: admin
+      ? "Paste your Piramyd admin API key (sk-... or pyd-key-...)"
+      : "Paste your Piramyd API key (sk-... or pyd-key-...)",
+    mask: "*",
+    validate(input) {
+      return isPiramydKey(input) ? undefined : "Provide a valid Piramyd API key (sk-... or pyd-key-...).";
+    },
+  });
+  if (p.isCancel(value)) {
+    p.cancel("Operation cancelled.");
+    process.exit(0);
+  }
+  return String(value || "").trim();
+}
+
+const KEY_SOURCE_LABEL = { flag: "the key you passed", env: "PIRAMYD_API_KEY", saved: "saved key", config: "key found in your CLI config" };
+
+/**
+ * One place decides which key to use, so no command asks for it twice.
+ * A key is only requested when none is saved, or when the user asks to change it
+ * (`piramyd login`, `--api-key`, `--change-key`).
+ */
+async function obtainApiKey(cli, { slot = SLOT_USER, configKey = "", interactive = true } = {}) {
+  const found = resolveStoredApiKey({
+    flagKey: cli.apiKeyFlag,
+    envKey: process.env.PIRAMYD_API_KEY,
+    slot,
+    configKey,
+  });
+
+  if (found.key && !(cli.changeKey && found.source !== "flag")) {
+    // An explicit --api-key replaces the saved one; a key adopted from a CLI
+    // config is remembered so later commands don't depend on that CLI.
+    if (found.source === "flag" || found.source === "config") {
+      try { saveKey(found.key, slot); } catch { /* unreadable store: still usable this run */ }
+    }
+    if (interactive) {
+      const hint = found.source === "saved" ? muted(" \u2014 change it with `piramyd login`") : "";
+      p.log.info(`${ok("\u2713")} Using ${KEY_SOURCE_LABEL[found.source]} ${accent(maskApiKey(found.key))}${hint}`);
+    }
+    return found.key;
   }
 
-  const message = existingApiKey
-    ? `Piramyd API key ${muted("(Enter to reuse)")}`
-    : "Paste your Piramyd API key (sk-...)";
+  if (!interactive) return "";
 
-  while (true) {
-    const answer = await p.password({ message });
-
-    if (p.isCancel(answer)) { p.cancel('Operation cancelled.'); process.exit(0); }
-
-    const result = (answer ? answer.trim() : "") || existingApiKey;
-    if (result && result.startsWith("sk-")) return result;
-    p.log.error("API key must start with sk-.");
+  const key = await promptNewApiKey({ admin: slot === SLOT_ADMIN });
+  try {
+    saveKey(key, slot);
+    p.log.info(`${ok("\u2713")} Key saved ${muted(`(${credentialsPath()})`)} \u2014 you won't be asked again.`);
+  } catch (err) {
+    p.log.warn(`Could not save the key (${err.message}); it will be asked again next time.`);
   }
+  return key;
+}
+
+function authHint(err) {
+  const message = String((err && err.message) || err || "");
+  return /\b(401|403)\b|unauthor|invalid.*key|credential/i.test(message)
+    ? `${message}\n  ${muted("The saved key was rejected \u2014 run `piramyd login` to replace it.")}`
+    : message;
 }
 
 // ── Plan confirmation ───────────────────────────────────────────
@@ -555,7 +609,7 @@ async function runDoctor() {
 
   for (const target of allTargets) {
     const key = getExistingApiKey(target) || findReusableApiKey(allTargets, target);
-    if (key && key.startsWith("sk-")) foundApiKey = key;
+    if (isPiramydKey(key)) foundApiKey = key;
     if (targetNeedsRepair(target)) targetsNeedingRepair.push(target);
   }
 
@@ -632,27 +686,6 @@ async function runDoctor() {
   p.outro(ok("Doctor completed successfully!"));
 }
 
-async function promptModelsApiKey(existingApiKey) {
-  const value = await p.password({
-    message: existingApiKey
-      ? `Piramyd API key ${muted("(Enter to reuse)")}`
-      : "Paste your Piramyd API key (sk-...)",
-    mask: "*",
-    validate(input) {
-      const candidate = String(input || existingApiKey || "").trim();
-      if (!candidate.startsWith("sk-")) return "Provide a valid Piramyd API key.";
-      return undefined;
-    },
-  });
-
-  if (p.isCancel(value)) {
-    p.cancel("Operation cancelled.");
-    process.exit(0);
-  }
-
-  return String(value || existingApiKey || "").trim();
-}
-
 function showModelProbeResults(catalog, results) {
   const upCount = results.filter((result) => result.ok).length;
   const downCount = results.length - upCount;
@@ -686,14 +719,13 @@ function renderModelProbeHeader() {
   return `  ${padRight(muted("Status"), MODEL_STATUS_WIDTH)} ${padRight(muted("Model"), MODEL_NAME_WIDTH)} ${padRight(muted(VISION_ICON), MODEL_VISION_WIDTH)} ${padRight(muted("Latency"), MODEL_LATENCY_WIDTH)} ${padRight(muted("Response"), MODEL_RESPONSE_WIDTH)}`;
 }
 
-async function runModels() {
+async function runModels(cli) {
   console.clear();
   console.log(renderModelsBanner());
   p.intro(pc.bgYellow(pc.black(" Piramyd Models ")));
 
   const targets = listAvailableTargets();
-  const existingApiKey = targets.length ? findReusableApiKey(targets, targets[0]) : "";
-  const apiKey = await promptModelsApiKey(existingApiKey);
+  const apiKey = await obtainApiKey(cli, { configKey: targets.length ? findReusableApiKey(targets, targets[0]) : "" });
 
   const spinner = p.spinner();
   spinner.start("Loading model catalog from Piramyd...");
@@ -703,7 +735,7 @@ async function runModels() {
     catalog = await loadCatalog(apiKey);
     spinner.stop(`Catalog loaded: ${em(String(catalog.models.length))} models ${muted(`(tier ${String(catalog.tier || "unknown").toUpperCase()})`)}`);
   } catch (error) {
-    spinner.stop(`Catalog load failed ${muted(`(${error.message})`)}`);
+    spinner.stop(`Catalog load failed ${muted(`(${authHint(error)})`)}`);
     process.exit(1);
   }
 
@@ -738,24 +770,6 @@ async function runModels() {
 }
 
 // ── prober (last probe round from the database) ─────────────────
-async function promptProberApiKey() {
-  const value = await p.password({
-    message: "Paste your Piramyd admin API key (sk-...)",
-    mask: "*",
-    validate(input) {
-      const candidate = String(input || "").trim();
-      if (!candidate) return "API key is required.";
-      if (!candidate.startsWith("sk-")) return "Provide a valid Piramyd API key (sk-...).";
-      return undefined;
-    },
-  });
-  if (p.isCancel(value)) {
-    p.cancel("Operation cancelled.");
-    process.exit(0);
-  }
-  return String(value || "").trim();
-}
-
 function proberFlagCell(value) {
   if (value === true) return ok("✓");
   if (value === false) return pc.red("✗");
@@ -846,9 +860,9 @@ async function runProberLive(cli) {
     p.intro(pc.bgYellow(pc.black(" Piramyd Prober — live contract check ")));
   }
 
-  const apiKey = cli.apiKey || (jsonOut ? "" : await promptProberApiKey());
-  if (!apiKey || !apiKey.startsWith("sk-")) {
-    throw new Error("prober --live requires an API key: --api-key sk-... or PIRAMYD_API_KEY");
+  const apiKey = await obtainApiKey(cli, { interactive: !jsonOut });
+  if (!isPiramydKey(apiKey)) {
+    throw new Error("prober --live requires an API key: run `piramyd login`, or pass --api-key / PIRAMYD_API_KEY");
   }
 
   const apiUrl = (cli.apiBase || DEFAULT_API_URL).replace(/\/+$/, "");
@@ -930,9 +944,9 @@ async function runProber(cli) {
     p.intro(pc.bgYellow(pc.black(" Piramyd Prober ")));
   }
 
-  const apiKey = cli.apiKey || (jsonOut ? "" : await promptProberApiKey());
-  if (!apiKey || !apiKey.startsWith("sk-")) {
-    throw new Error("prober requires an admin API key: --api-key sk-... or PIRAMYD_API_KEY");
+  const apiKey = await obtainApiKey(cli, { slot: SLOT_ADMIN, interactive: !jsonOut });
+  if (!isPiramydKey(apiKey)) {
+    throw new Error("prober requires an admin API key: pass --api-key once (it is saved), or set PIRAMYD_API_KEY");
   }
 
   const apiUrl = (cli.apiBase || DEFAULT_API_URL).replace(/\/+$/, "");
@@ -1267,6 +1281,74 @@ async function runChat(cli) {
   p.outro(ok("Inventário concluído. Nada foi alterado."));
 }
 
+// ── login / logout / whoami ─────────────────────────────────────
+async function runLogin(cli) {
+  const interactive = !cli.json;
+  if (interactive) p.intro(pc.bgYellow(pc.black(" Piramyd Login ")));
+
+  const slot = cli.admin ? SLOT_ADMIN : SLOT_USER;
+  let key = isPiramydKey(cli.apiKeyFlag) ? cli.apiKeyFlag : "";
+  if (!key) {
+    if (!interactive) throw new Error("login --json needs --api-key");
+    key = await promptNewApiKey({ admin: slot === SLOT_ADMIN });
+  }
+
+  if (slot === SLOT_USER) {
+    const spinner = interactive ? p.spinner() : null;
+    if (spinner) spinner.start("Checking the key...");
+    try {
+      const catalog = await loadCatalog(key);
+      if (spinner) spinner.stop(`Key accepted ${muted(`(tier ${String(catalog.tier || "unknown").toUpperCase()}, ${catalog.models.length} models)`)}`);
+    } catch (err) {
+      if (spinner) spinner.stop(pc.red("Key rejected."));
+      throw new Error(`Piramyd rejected that key: ${err.message || err}`);
+    }
+  }
+
+  saveKey(key, slot);
+  if (cli.json) {
+    console.log(JSON.stringify({ saved: true, slot, key: maskApiKey(key), path: credentialsPath() }));
+    return;
+  }
+  p.outro(ok(`Saved ${maskApiKey(key)} to ${credentialsPath()}. Commands will reuse it from now on.`));
+}
+
+function runLogout(cli) {
+  const removed = clearKeys();
+  if (cli.json) {
+    console.log(JSON.stringify({ removed }));
+    return;
+  }
+  console.log(removed
+    ? `${ok("\u2713")} Removed ${removed} saved key${removed === 1 ? "" : "s"}. CLI configs written by the wizard were left as they are.`
+    : `${muted("No saved key to remove.")}`);
+}
+
+function runWhoami(cli) {
+  const found = resolveStoredApiKey({
+    flagKey: cli.apiKeyFlag,
+    envKey: process.env.PIRAMYD_API_KEY,
+    slot: SLOT_USER,
+  });
+  const admin = getSavedKey(SLOT_ADMIN);
+  if (cli.json) {
+    console.log(JSON.stringify({
+      key: found.key ? maskApiKey(found.key) : null,
+      source: found.source,
+      admin_key_saved: Boolean(admin),
+      path: credentialsPath(),
+    }));
+    return;
+  }
+  if (!found.key) {
+    console.log(`  ${muted("No key saved.")} Run ${em("piramyd login")} once and every command will reuse it.`);
+    return;
+  }
+  console.log(`  ${em("Key:")}    ${accent(maskApiKey(found.key))}  ${muted(`(${KEY_SOURCE_LABEL[found.source]})`)}`);
+  console.log(`  ${em("Admin:")}  ${admin ? accent(maskApiKey(admin)) : muted("none saved")}`);
+  console.log(`  ${em("Store:")}  ${muted(credentialsPath())}`);
+}
+
 function printHelp() {
   console.log([
     "",
@@ -1278,6 +1360,9 @@ function printHelp() {
     "",
     `  ${em("Commands:")}`,
     `    ${muted("(default)")}     Interactive onboarding wizard`,
+    `    ${muted("login")}         Save your API key once; every command reuses it`,
+    `    ${muted("logout")}        Forget the saved key`,
+    `    ${muted("whoami")}        Show which key is in use and where it comes from`,
     `    ${muted("doctor")}        Auto-detect and repair broken configurations`,
     `    ${muted("models")}        Realtime health check for all models in your tier`,
     `    ${muted("prober")}        Print the last probe round from the database (admin API key)`,
@@ -1292,12 +1377,13 @@ function printHelp() {
     `    ${muted("--dry-run")}              Preview changes without writing any files`,
     `    ${muted("--yes, -y")}              Non-interactive apply (no prompts)`,
     `    ${muted("--target <kinds>")}       comma-separated: ${KNOWN_TARGETS.map((t) => t.kind).join(", ")}`,
-    `    ${muted("--api-key <sk-...>")}     API key (or PIRAMYD_API_KEY) — prober needs an admin key`,
+    `    ${muted("--api-key <sk-...>")}     API key, saved for next time (or PIRAMYD_API_KEY) — prober needs an admin key`,
     `    ${muted("--model <id>")}           Default model id ${muted("(prober: show/check only this model)")}`,
     `    ${muted("--live")}                 prober: check the live public API instead of stored history`,
     `    ${muted("--all")}                  prober --live: check every model in the catalog`,
     `    ${muted("--from <profile>")}        chat: source profile (claude, claude-piramyd, ...)`,
     `    ${muted("--to <profile>")}          chat: destination profile`,
+    `    ${muted("--change-key")}           Ask for a new key even if one is saved`,
     `    ${muted("--json")}                 Machine-readable output`,
     `    ${muted("--help, -h")}             Show this help message`,
     "",
@@ -1356,9 +1442,9 @@ async function runNonInteractiveOnboard(cli) {
     throw new Error("non-interactive mode requires --target <kind>[,kind]");
   }
   const existingApiKey = findReusableApiKey(listAvailableTargets().length ? listAvailableTargets() : selectedTargets, selectedTargets[0]);
-  const apiKey = cli.apiKey || existingApiKey;
-  if (!apiKey || !apiKey.startsWith("sk-")) {
-    throw new Error("non-interactive mode requires --api-key sk-... or PIRAMYD_API_KEY");
+  const apiKey = await obtainApiKey(cli, { configKey: existingApiKey, interactive: false });
+  if (!isPiramydKey(apiKey)) {
+    throw new Error("non-interactive mode needs a key: run `piramyd login` once, or pass --api-key / PIRAMYD_API_KEY");
   }
 
   let catalog;
@@ -1406,12 +1492,16 @@ async function main() {
     process.exit(0);
   }
 
+  if (cli.command === "login") return runLogin(cli);
+  if (cli.command === "logout") return runLogout(cli);
+  if (cli.command === "whoami") return runWhoami(cli);
+
   if (cli.command === "doctor") {
     return runDoctor();
   }
 
   if (cli.command === "models") {
-    return runModels();
+    return runModels(cli);
   }
 
   if (cli.command === "prober") {
@@ -1445,8 +1535,7 @@ async function main() {
   }
 
   const selectedTargets = await chooseConfig(targets);
-  const existingApiKey = findReusableApiKey(targets, selectedTargets[0]);
-  const apiKey = await promptApiKey(existingApiKey);
+  const apiKey = await obtainApiKey(cli, { configKey: findReusableApiKey(targets, selectedTargets[0]) });
 
   const spinner = p.spinner();
   spinner.start("Connecting to Piramyd...");
@@ -1457,7 +1546,7 @@ async function main() {
     spinner.stop(`Catalog loaded: ${em(String(catalog.models.length))} models ${muted(`(tier ${catalog.tier.toUpperCase()})`)}`);
   } catch (err) {
     spinner.stop(pc.red("Catalog failed."));
-    p.cancel(err.message || String(err));
+    p.cancel(authHint(err));
     process.exit(1);
   }
 

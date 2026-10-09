@@ -44,6 +44,23 @@ npx piramyd
 npx piramyd doctor
 ```
 
+### Chave guardada (pede-se uma só vez)
+
+A key é pedida uma única vez e fica em `~/.piramyd/credentials.json` (modo 600). Todos os comandos
+reutilizam-na; só muda quando o utilizador o pede explicitamente.
+
+```bash
+npx piramyd login            # guarda (e valida) a key
+npx piramyd login --admin    # guarda a key de admin usada por `prober`
+npx piramyd whoami           # mostra a key em uso e de onde vem
+npx piramyd logout           # esquece a key guardada
+npx piramyd models --change-key   # troca a key neste comando
+npx piramyd models --api-key pyd-key-...   # uma key passada por flag substitui a guardada
+```
+
+Ordem de escolha: `--api-key` > `PIRAMYD_API_KEY` > guardada > key já presente na config de uma CLI.
+Aceita `sk-...` e `pyd-key-...`. `PIRAMYD_CONFIG_DIR` muda a pasta de credenciais.
+
 ### Estado, restore e modo não-interactivo
 
 ```bash

@@ -1,4 +1,5 @@
 const fs = require("fs");
+const { isPiramydKey } = require("./credentials");
 const {
   KNOWN_TARGETS,
   CODEX_LAUNCHER_PATH,
@@ -19,7 +20,7 @@ function inspectTarget(target) {
   const binaryPath = target.binaryName ? resolveCommand(target.binaryName) : null;
   const configExists = exists(target.path);
   const key = getExistingApiKey(target);
-  const hasKey = Boolean(key && key.startsWith("sk-"));
+  const hasKey = isPiramydKey(key);
   const launcher = launcherPathFor(target.kind);
   const launcherExists = Boolean(launcher && exists(launcher));
   const configured = hasKey || configExists || launcherExists;

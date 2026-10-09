@@ -1,4 +1,5 @@
 const fs = require("fs");
+const { isPiramydKey } = require("./credentials");
 const path = require("path");
 const { spawnSync } = require("child_process");
 const {
@@ -83,7 +84,7 @@ function findReusableApiKey(targets, selectedTarget) {
   const ordered = [selectedTarget, ...targets.filter((target) => target.path !== selectedTarget.path)];
   for (const target of ordered) {
     const apiKey = getExistingApiKey(target);
-    if (apiKey.startsWith("sk-")) return apiKey;
+    if (isPiramydKey(apiKey)) return apiKey;
   }
   return "";
 }
@@ -161,7 +162,7 @@ function codexShimHealth() {
  */
 function targetNeedsRepair(target) {
   const key = getExistingApiKey(target);
-  if (!key || !key.startsWith("sk-")) return true;
+  if (!isPiramydKey(key)) return true;
   if (target.kind === "codex") {
     if (!codexHasExpectedConfig(target.path)) return true;
     if (!codexLauncherLooksHealthy()) return true;

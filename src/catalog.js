@@ -113,6 +113,12 @@ async function fetchModels(apiKey) {
     const metadata = await fetchWithRetry(metadataUrl, apiKey, 3);
     return { payload: metadata, source: metadataUrl, sourceType: "remote" };
   } catch (metadataError) {
+    // A rejected key must not be papered over by the public model list: that
+    // would let `login` save a bad key and every command then run "unknown tier".
+    const status = Number(metadataError?.statusCode || 0);
+    if (status === 401 || status === 403) {
+      throw new Error(`HTTP ${status} - the API key was rejected by Piramyd`);
+    }
     try {
       const fallback = await fetchWithRetry(modelsUrl, apiKey, 2);
       const models = Array.isArray(fallback?.data) ? fallback.data : Array.isArray(fallback?.models) ? fallback.models : [];

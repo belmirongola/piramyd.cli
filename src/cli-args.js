@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["doctor", "models", "status", "restore", "prober", "chat"]);
+const COMMANDS = new Set(["doctor", "models", "status", "restore", "prober", "chat", "login", "logout", "whoami"]);
 
 function parseCliArgs(argv) {
   const raw = Array.isArray(argv) ? argv.slice() : [];
@@ -14,7 +14,9 @@ function parseCliArgs(argv) {
       token === "--json" ||
       token === "--help" ||
       token === "--live" ||
-      token === "--all"
+      token === "--all" ||
+      token === "--change-key" ||
+      token === "--admin"
     ) {
       flags.add(token);
       continue;
@@ -58,8 +60,11 @@ function parseCliArgs(argv) {
     help: flags.has("--help"),
     live: flags.has("--live"),
     all: flags.has("--all"),
+    changeKey: flags.has("--change-key"),
+    admin: flags.has("--admin"),
     targets,
     apiKey: String(opts["api-key"] || process.env.PIRAMYD_API_KEY || "").trim(),
+    apiKeyFlag: String(opts["api-key"] || "").trim(),
     model: String(opts.model || "").trim(),
     apiBase: String(opts["api-base"] || process.env.PIRAMYD_BASE_URL || "").trim(),
     from: String(opts.from || "").trim().toLowerCase(),

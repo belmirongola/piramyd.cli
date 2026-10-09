@@ -95,3 +95,30 @@ describe('catalog normalize/sanitize', () => {
     expect(visionIcon({ input: ['text'] })).toBe('');
   });
 });
+
+describe("fetchModels with a rejected key", () => {
+  test("does not fall back to the public list on 401/403", async () => {
+    const https = require("https");
+    const { EventEmitter } = require("events");
+    const spy = jest.spyOn(https, "get").mockImplementation((_url, _opts, cb) => {
+      const req = new EventEmitter();
+      req.setTimeout = () => {};
+      req.destroy = () => {};
+      setTimeout(() => {
+        const res = new EventEmitter();
+        res.statusCode = 401;
+        cb(res);
+        res.emit("data", '{"detail":"nope"}');
+        res.emit("end");
+      }, 0);
+      return req;
+    });
+    try {
+      const { fetchModels } = require("../src/catalog");
+      await expect(fetchModels("sk-bogus")).rejects.toThrow(/rejected/);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

@@ -8,6 +8,7 @@
  *    GET /v1/status/models (background platform health cache).
  */
 const https = require("https");
+const { isPiramydKey } = require("./credentials");
 const { PIRAMYD_OPENAI_BASE_URL, PIRAMYD_ROOT_URL } = require("./constants");
 
 const DEFAULT_PROBE_TIMEOUT_MS = 90_000;
@@ -359,7 +360,7 @@ async function probeModelsConcurrent(apiKey, models, options = {}) {
   const key = String(apiKey || "").trim();
 
   // Prefer live probes with the user's key (real product path).
-  if (key.startsWith("sk-")) {
+  if (isPiramydKey(key)) {
     const results = new Array(models.length);
     let nextIndex = 0;
 
